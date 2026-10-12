@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Project</title>
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <main class="wrap">
+    <a class="back" href="index.html">← All projects</a>
+    <div id="content"></div>
+  </main>
+
+  <script src="assets/projects.js"></script>
+  <script>
+    const id = new URLSearchParams(location.search).get("id");
+    const p = PROJECTS.find((x) => x.id === id);
+    const el = document.getElementById("content");
+
+    if (!p) {
+      el.innerHTML = `<h1>Project not found</h1><p class="meta">Head back to the project list.</p>`;
+    } else {
+      document.title = `${p.name} · Projects`;
+      const done = p.tasks.filter((t) => t.done).length;
+      const pct = p.tasks.length ? Math.round((done / p.tasks.length) * 100) : 0;
+
+      el.innerHTML = `
+        <div class="detail-head">
+          <span class="card-icon" aria-hidden="true">${p.icon}</span>
+          <h1>${p.name}</h1>
+          <span class="pill ${p.status}">${STATUS_LABELS[p.status]}</span>
+        </div>
+        <p class="meta">${p.category}</p>
+        ${p.link ? `<a class="btn" href="${p.link}" target="_blank" rel="noopener">Visit website ↗</a>` : ""}
+
+        <div class="panels">
+          <section class="panel wide">
+            <h2>Overview</h2>
+            <p style="margin:0">${p.overview}</p>
+          </section>
+
+          <section class="panel">
+            <h2>Current focus</h2>
+            <ul>${p.focus.map((f) => `<li>${f}</li>`).join("")}</ul>
+          </section>
+
+          <section class="panel">
+            <h2>Progress</h2>
+            <div class="progress" style="font-size:1rem">
+              <div class="bar" style="height:10px"><span style="width:${pct}%"></span></div>${pct}%
+            </div>
+            <p class="meta" style="margin:8px 0 0">${done} of ${p.tasks.length} steps complete</p>
+          </section>
+
+          <section class="panel wide">
+            <h2>Next steps</h2>
+            <ul class="tasks">
+              ${p.tasks.map((t) => `
+                <li class="${t.done ? "done" : ""}">
+                  <span class="check" aria-hidden="true">${t.done ? "✓" : ""}</span>
+                  <span>${t.text}</span>
+                </li>`).join("")}
+            </ul>
+          </section>
+        </div>`;
+    }
+  </script>
+</body>
+</html>

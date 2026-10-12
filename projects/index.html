@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Projects</title>
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+  <main class="wrap">
+    <nav class="crumbs"><a href="../">Home</a> / Projects</nav>
+    <header class="site-header">
+      <h1>Projects</h1>
+      <p>Everything I'm building, learning, and working on. Pick a project to see the details.</p>
+    </header>
+
+    <section class="grid" id="grid" aria-label="Projects"></section>
+
+    <footer>Last updated <span id="updated"></span></footer>
+  </main>
+
+  <script src="../assets/projects.js"></script>
+  <script>
+    const pct = (p) => {
+      const n = p.tasks.length;
+      return n ? Math.round((p.tasks.filter((t) => t.done).length / n) * 100) : 0;
+    };
+
+    document.getElementById("grid").innerHTML = PROJECTS.map((p) => `
+      <a class="card" href="project.html?id=${p.id}">
+        <div class="card-top">
+          <span class="card-icon" aria-hidden="true">${p.icon}</span>
+          <span class="pill ${p.status}">${STATUS_LABELS[p.status]}</span>
+        </div>
+        <h2>${p.name}</h2>
+        <p>${p.tagline}</p>
+        <div class="progress">
+          <div class="bar"><span style="width:${pct(p)}%"></span></div>${pct(p)}%
+        </div>
+        <span class="card-cta">View project →</span>
+      </a>`).join("");
+
+    document.getElementById("updated").textContent =
+      new Date(document.lastModified).toLocaleDateString();
+  </script>
+</body>
+</html>

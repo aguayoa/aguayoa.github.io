@@ -1,40 +1,46 @@
-# Projects
+# aguayoa.github.io
 
-A small web app with a page for each project I'm working on, plus a Markdown tracker and GitHub issue forms.
+My personal homepage: a Projects section with a page per project, and a walk-in VR Calendar.
 
 **Projects:** AI Data Analytics · Javlin Concepts · Aware · Fridge Cig
 
-## Files
+## Pages
 
-| File | Purpose |
+| Page | URL | File |
+|---|---|---|
+| Home | `/` | `index.html` |
+| Projects | `/projects/` | `projects/index.html`, `projects/project.html` |
+| Calendar (VR) | `/calendar/` | `calendar/index.html` |
+
+## Files you edit
+
+| File | What it controls |
 |---|---|
-| `index.html` | Home page with a button for each project |
-| `project.html` | Detail page for each project (`project.html?id=aware`) |
-| `assets/projects.js` | **Edit this** to change project info, tasks, and status |
-| `assets/style.css` | Styling (light and dark mode) |
-| `PROJECT_TRACKER.md` | Checklist version that renders on GitHub |
-| `.github/ISSUE_TEMPLATE/` | Forms for tasks, bugs, and features |
-
-## Viewing locally
-
-Double-click `index.html` to open it in your browser.
+| `assets/projects.js` | Project info, tasks, status |
+| `assets/events.js` | Events shown on the Calendar wall |
+| `index.html` | Greeting name (`OWNER`) |
+| `calendar/index.html` | Fiscal year settings (`FY_START_MONTH`, `FY_CHOICES`) |
 
 ## Updating
 
 - **Check off a task:** in `assets/projects.js`, change `done: false` to `done: true`.
 - **Change status:** set `status` to `active`, `planning`, `talks`, `paused`, or `done`.
 - **Add a project:** copy one `{ ... }` block in `assets/projects.js` and give it a new `id`.
+- **Add a calendar event:** add `{ date: "2026-03-15", title: "Short title" }` to `assets/events.js`.
 
-## Put it on GitHub (and make it a live website)
+## Calendar in VR
+
+Open `https://aguayoa.github.io/calendar/` in your headset's browser (e.g. Meta Quest Browser) and press **VR**.
+Left stick walks, right stick turns, trigger picks a month to bring it close.
+
+## Publishing
+
+Live at **https://aguayoa.github.io/**. Push to `main` and GitHub Pages updates within a minute:
 
 ```bash
-git init
 git add .
-git commit -m "Add Projects site"
-gh repo create projects --public --source=. --push
+git commit -m "Update site"
+git push
 ```
-
-Then on GitHub, go to **Settings → Pages**, choose **Deploy from a branch**, and select `main` / `root`.
-Your site will be live at `https://<your-username>.github.io/projects/`.
 
 > GitHub Pages on a free account requires a **public** repo. Don't put anything private in these files.

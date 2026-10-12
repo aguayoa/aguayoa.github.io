@@ -4,22 +4,22 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Project</title>
-  <link rel="stylesheet" href="assets/style.css">
+  <link rel="stylesheet" href="../assets/style.css">
 </head>
 <body>
   <main class="wrap">
-    <a class="back" href="index.html">← All projects</a>
+    <nav class="crumbs"><a href="../">Home</a> / <a href="./">Projects</a></nav>
     <div id="content"></div>
   </main>
 
-  <script src="assets/projects.js"></script>
+  <script src="../assets/projects.js"></script>
   <script>
     const id = new URLSearchParams(location.search).get("id");
     const p = PROJECTS.find((x) => x.id === id);
     const el = document.getElementById("content");
 
     if (!p) {
-      el.innerHTML = `<h1>Project not found</h1><p class="meta">Head back to the project list.</p>`;
+      el.innerHTML = `<h1>Project not found</h1><p class="meta"><a href="./">Back to all projects</a></p>`;
     } else {
       document.title = `${p.name} · Projects`;
       const done = p.tasks.filter((t) => t.done).length;

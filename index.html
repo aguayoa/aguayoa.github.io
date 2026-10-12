@@ -3,44 +3,57 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Projects</title>
+  <title>aguayoa</title>
   <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
   <main class="wrap">
     <header class="site-header">
-      <h1>Projects</h1>
-      <p>Everything I'm building, learning, and working on. Pick a project to see the details.</p>
+      <!-- Change the name in OWNER below to personalize the greeting -->
+      <p class="hello" id="hello"></p>
+      <h1>Home</h1>
+      <p class="today" id="today"></p>
     </header>
 
-    <section class="grid" id="grid" aria-label="Projects"></section>
+    <section class="home-grid" aria-label="Sections">
+      <a class="card home-tile" href="projects/">
+        <div class="card-top">
+          <span class="card-icon" aria-hidden="true">🗂️</span>
+          <span class="tag" id="project-count"></span>
+        </div>
+        <h2>Projects</h2>
+        <p>AI Data Analytics, Javlin Concepts, Aware, Fridge Cig, and whatever comes next.</p>
+        <span class="card-cta">Open Projects →</span>
+      </a>
 
-    <footer>Last updated <span id="updated"></span></footer>
+      <a class="card home-tile" href="calendar/">
+        <div class="card-top">
+          <span class="card-icon" aria-hidden="true">🗓️</span>
+          <span class="tag">VR ready</span>
+        </div>
+        <h2>Calendar</h2>
+        <p>Step into the Time Chamber: a full fiscal-year calendar you can walk around in VR, or explore in your browser.</p>
+        <span class="card-cta">Enter the room →</span>
+      </a>
+    </section>
+
+    <footer>aguayoa.github.io</footer>
   </main>
 
   <script src="assets/projects.js"></script>
   <script>
-    const pct = (p) => {
-      const n = p.tasks.length;
-      return n ? Math.round((p.tasks.filter((t) => t.done).length / n) * 100) : 0;
-    };
+    const OWNER = "aguayoa";
 
-    document.getElementById("grid").innerHTML = PROJECTS.map((p) => `
-      <a class="card" href="project.html?id=${p.id}">
-        <div class="card-top">
-          <span class="card-icon" aria-hidden="true">${p.icon}</span>
-          <span class="pill ${p.status}">${STATUS_LABELS[p.status]}</span>
-        </div>
-        <h2>${p.name}</h2>
-        <p>${p.tagline}</p>
-        <div class="progress">
-          <div class="bar"><span style="width:${pct(p)}%"></span></div>${pct(p)}%
-        </div>
-        <span class="card-cta">View project →</span>
-      </a>`).join("");
+    const h = new Date().getHours();
+    const part = h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening";
+    document.getElementById("hello").textContent = `${part}, ${OWNER}`;
+    document.getElementById("today").textContent = new Date().toLocaleDateString(undefined, {
+      weekday: "long", month: "long", day: "numeric", year: "numeric",
+    });
 
-    document.getElementById("updated").textContent =
-      new Date(document.lastModified).toLocaleDateString();
+    const active = PROJECTS.filter((p) => p.status === "active").length;
+    document.getElementById("project-count").textContent =
+      `${PROJECTS.length} projects · ${active} active`;
   </script>
 </body>
 </html>

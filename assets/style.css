@@ -115,11 +115,27 @@ a { color: var(--accent); }
 .bar > span { display: block; height: 100%; background: var(--accent); border-radius: inherit; }
 
 /* ── Project detail page ────────────────── */
-.back {
-  display: inline-block;
-  margin-bottom: 24px;
-  text-decoration: none;
+.crumbs { margin-bottom: 24px; font-size: 0.9rem; color: var(--muted); }
+.crumbs a { text-decoration: none; font-weight: 600; }
+
+/* ── Homepage ───────────────────────────── */
+.hello { color: var(--muted); margin: 0 0 4px; font-weight: 600; }
+.today { color: var(--muted); margin: 0 0 32px; }
+.home-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+}
+.home-tile { padding: 28px; gap: 12px; min-height: 220px; }
+.home-tile .card-icon { font-size: 2.5rem; }
+.home-tile h2 { font-size: 1.5rem; }
+.tag {
+  font-size: 0.75rem;
   font-weight: 600;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  padding: 3px 10px;
+  border-radius: 999px;
 }
 .detail-head { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
 .detail-head .card-icon { font-size: 2.5rem; }

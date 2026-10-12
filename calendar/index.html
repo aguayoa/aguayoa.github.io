@@ -1,0 +1,422 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Calendar</title>
+  <script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>
+  <style>
+    html, body { margin: 0; height: 100%; background: #f3efe6; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    .hud {
+      position: fixed; top: 16px; left: 16px; z-index: 10;
+      max-width: calc(100vw - 32px);
+      background: rgba(255, 253, 248, 0.88);
+      backdrop-filter: blur(6px);
+      border: 1px solid #e3ddd0; border-radius: 14px;
+      padding: 14px 16px; color: #1b1b1a;
+    }
+    .hud nav { font-size: 0.85rem; color: #6b6b66; margin-bottom: 6px; }
+    .hud nav a { color: #2b59c3; font-weight: 600; text-decoration: none; }
+    .hud h1 { font-size: 1.1rem; margin: 0 0 8px; }
+    .fy { display: flex; gap: 6px; margin-bottom: 8px; }
+    .fy button {
+      font: inherit; font-size: 0.85rem; font-weight: 600; cursor: pointer;
+      padding: 5px 12px; border-radius: 999px;
+      border: 1px solid #d6cfbf; background: #fff; color: #1b1b1a;
+    }
+    .fy button[aria-pressed="true"] { background: #2b59c3; border-color: #2b59c3; color: #fff; }
+    .hint { font-size: 0.8rem; color: #6b6b66; margin: 0; line-height: 1.45; }
+  </style>
+</head>
+<body>
+  <div class="hud">
+    <nav><a href="../">Home</a> / Calendar</nav>
+    <h1>The Time Chamber</h1>
+    <div class="fy" id="fy-buttons"></div>
+    <p class="hint">
+      Drag to look · WASD / arrows to walk · click a month to bring it close<br>
+      VR: press <strong>VR</strong> (bottom right) · left stick walks · right stick turns · trigger picks a month
+    </p>
+  </div>
+
+  <a-scene
+    background="color: #f3efe6"
+    fog="type: exponential; color: #f3efe6; density: 0.009"
+    renderer="antialias: true; colorManagement: true"
+    cursor="rayOrigin: mouse"
+    raycaster="objects: .clickable; far: 120"
+    vr-mode-ui="enabled: true">
+
+    <!-- Light -->
+    <a-entity light="type: ambient; color: #ffffff; intensity: 0.6"></a-entity>
+    <a-entity light="type: directional; color: #fffaf0; intensity: 0.45" position="-4 12 6"></a-entity>
+
+    <!-- Endless tiled floor -->
+    <a-entity tiled-floor></a-entity>
+
+    <!-- The palace: platform, columns, dome -->
+    <a-cylinder radius="7.2" height="0.12" position="0 0.06 3" color="#ece6d9"></a-cylinder>
+    <a-cylinder radius="6.4" height="0.25" position="0 0.125 3" color="#f8f5ee"></a-cylinder>
+    <a-entity palace-columns position="0 0 3"></a-entity>
+    <a-torus radius="5.6" radius-tubular="0.35" rotation="90 0 0" position="0 5.2 3" color="#f8f5ee" segments-tubular="48"></a-torus>
+    <a-sphere radius="5.6" theta-length="90" position="0 5.2 3" color="#fbf9f4" material="side: double" segments-width="48" segments-height="16"></a-sphere>
+
+    <!-- Twin spires framing the calendar -->
+    <a-cone radius-bottom="1.4" radius-top="0.25" height="34" position="-19 17 -22" color="#f8f5ee"></a-cone>
+    <a-cone radius-bottom="1.4" radius-top="0.25" height="34" position="19 17 -22" color="#f8f5ee"></a-cone>
+
+    <!-- The giant calendar wall -->
+    <a-box width="30" height="22" depth="0.6" position="0 12 -22.8" color="#e9e3d6"></a-box>
+    <a-entity calendar-wall></a-entity>
+
+    <!-- You -->
+    <a-entity id="rig" position="0 0.25 -2.8" stick-move>
+      <a-entity id="cam" camera look-controls="pointerLockEnabled: false" wasd-controls="acceleration: 140" position="0 1.6 0"></a-entity>
+      <a-entity id="left-hand" laser-controls="hand: left" raycaster="objects: .clickable; far: 120; lineColor: #2b59c3"></a-entity>
+      <a-entity id="right-hand" laser-controls="hand: right" raycaster="objects: .clickable; far: 120; lineColor: #2b59c3"></a-entity>
+    </a-entity>
+  </a-scene>
+
+  <script src="../assets/events.js"></script>
+  <script>
+    // ── Settings ──────────────────────────────────────────────
+    // FY_START_MONTH: 10 = federal fiscal year (FY26 = Oct 2025 – Sep 2026).
+    //                 Set to 1 to make FY26 = Jan – Dec 2026.
+    const FY_START_MONTH = 10;
+    const FY_CHOICES = [26, 27];
+    const DEFAULT_FY = 26;
+
+    const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+    const MONTHS_SHORT = MONTHS.map((m) => m.slice(0, 3));
+    const Q_COLORS = ["#2b59c3", "#1f8a4c", "#b7791f", "#6b46c1"];
+    const pad = (n) => String(n).padStart(2, "0");
+    const keyOf = (y, m, d) => `${y}-${pad(m + 1)}-${pad(d)}`;
+
+    function fiscalMonths(fy) {
+      const startYear = FY_START_MONTH === 1 ? 2000 + fy : 2000 + fy - 1;
+      return Array.from({ length: 12 }, (_, i) => {
+        const offset = FY_START_MONTH - 1 + i;
+        return { year: startYear + Math.floor(offset / 12), month: offset % 12, quarter: Math.floor(i / 3) + 1 };
+      });
+    }
+
+    function eventsByDate() {
+      const map = {};
+      (window.EVENTS || []).forEach((e) => (map[e.date] ||= []).push(e));
+      return map;
+    }
+
+    // ── Canvas drawing ────────────────────────────────────────
+    const FONT = "system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif";
+
+    function fitText(ctx, text, maxW) {
+      if (ctx.measureText(text).width <= maxW) return text;
+      while (text.length && ctx.measureText(text + "…").width > maxW) text = text.slice(0, -1);
+      return text + "…";
+    }
+
+    function drawMonth(canvas, { year, month, quarter }, events) {
+      const ctx = canvas.getContext("2d");
+      const W = canvas.width, H = canvas.height;
+      const qc = Q_COLORS[quarter - 1];
+      const now = new Date();
+      const todayKey = keyOf(now.getFullYear(), now.getMonth(), now.getDate());
+
+      ctx.fillStyle = "#fffdf8";
+      ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = qc;
+      ctx.fillRect(0, 0, W, 16);
+
+      ctx.textBaseline = "alphabetic";
+      ctx.textAlign = "left";
+      ctx.fillStyle = "#1b1b1a";
+      ctx.font = `700 76px ${FONT}`;
+      ctx.fillText(MONTHS[month], 48, 116);
+      const mw = ctx.measureText(MONTHS[month]).width;
+      ctx.fillStyle = "#8a857a";
+      ctx.font = `500 46px ${FONT}`;
+      ctx.fillText(String(year), 48 + mw + 22, 116);
+
+      ctx.textAlign = "right";
+      ctx.fillStyle = qc;
+      ctx.font = `800 40px ${FONT}`;
+      ctx.fillText(`Q${quarter}`, W - 48, 110);
+
+      const x0 = 40, cw = (W - 80) / 7;
+      ctx.textAlign = "center";
+      ctx.font = `600 30px ${FONT}`;
+      ["SUN","MON","TUE","WED","THU","FRI","SAT"].forEach((d, i) => {
+        ctx.fillStyle = i === 0 || i === 6 ? "#b0aa9d" : "#6b6b66";
+        ctx.fillText(d, x0 + cw * i + cw / 2, 184);
+      });
+      ctx.fillStyle = "#e6e0d3";
+      ctx.fillRect(40, 204, W - 80, 3);
+
+      const top = 216, rh = (H - top - 24) / 6;
+      const first = new Date(year, month, 1).getDay();
+      const days = new Date(year, month + 1, 0).getDate();
+
+      for (let d = 1; d <= days; d++) {
+        const idx = first + d - 1;
+        const c = idx % 7, r = Math.floor(idx / 7);
+        const x = x0 + c * cw, y = top + r * rh;
+        const key = keyOf(year, month, d);
+        const weekend = c === 0 || c === 6;
+
+        ctx.fillStyle = weekend ? "#f6f2e9" : "#fffdf8";
+        ctx.fillRect(x + 3, y + 3, cw - 6, rh - 6);
+        ctx.strokeStyle = "#ece6da";
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x + 3, y + 3, cw - 6, rh - 6);
+
+        ctx.textAlign = "left";
+        ctx.font = `600 40px ${FONT}`;
+        if (key === todayKey) {
+          ctx.fillStyle = "#2b59c3";
+          ctx.beginPath();
+          ctx.arc(x + 40, y + 40, 29, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = "#ffffff";
+          ctx.textAlign = "center";
+          ctx.fillText(String(d), x + 40, y + 54);
+        } else {
+          ctx.fillStyle = weekend ? "#a39d90" : "#1b1b1a";
+          ctx.fillText(String(d), x + 16, y + 54);
+        }
+
+        (events[key] || []).slice(0, 2).forEach((e, i) => {
+          const ey = y + 82 + i * 24;
+          ctx.fillStyle = e.color || "#2b59c3";
+          ctx.beginPath();
+          ctx.arc(x + 18, ey - 7, 6, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.textAlign = "left";
+          ctx.font = `600 20px ${FONT}`;
+          ctx.fillText(fitText(ctx, e.title, cw - 42), x + 30, ey);
+        });
+      }
+    }
+
+    function drawTitle(canvas, fy) {
+      const ctx = canvas.getContext("2d");
+      const W = canvas.width, H = canvas.height;
+      const months = fiscalMonths(fy);
+      const a = months[0], b = months[11];
+      const lastDay = new Date(b.year, b.month + 1, 0).getDate();
+
+      ctx.clearRect(0, 0, W, H);
+      ctx.textAlign = "center";
+      ctx.fillStyle = "#1b1b1a";
+      ctx.font = `800 300px ${FONT}`;
+      ctx.fillText(`FY${fy}`, W / 2, 310);
+      ctx.fillStyle = "#6b6b66";
+      ctx.font = `500 84px ${FONT}`;
+      ctx.fillText(`${MONTHS_SHORT[a.month]} 1, ${a.year}  –  ${MONTHS_SHORT[b.month]} ${lastDay}, ${b.year}`, W / 2, 460);
+    }
+
+    function canvasTexture(canvas) {
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      tex.anisotropy = 8;
+      return tex;
+    }
+
+    // ── Desktop drag vs. click ───────────────────────────────
+    let downAt = null, dragged = false;
+    window.addEventListener("pointerdown", (e) => { downAt = [e.clientX, e.clientY]; dragged = false; });
+    window.addEventListener("pointermove", (e) => {
+      if (downAt && Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 6) dragged = true;
+    });
+    window.addEventListener("pointerup", () => { downAt = null; });
+
+    // ── Components ───────────────────────────────────────────
+    AFRAME.registerComponent("tiled-floor", {
+      init() {
+        const c = document.createElement("canvas");
+        c.width = c.height = 256;
+        const ctx = c.getContext("2d");
+        ctx.fillStyle = "#f7f4ed";
+        ctx.fillRect(0, 0, 256, 256);
+        ctx.strokeStyle = "#ddd6c7";
+        ctx.lineWidth = 4;
+        ctx.strokeRect(0, 0, 256, 256);
+        const tex = canvasTexture(c);
+        tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+        tex.repeat.set(200, 200);
+        const mesh = new THREE.Mesh(
+          new THREE.PlaneGeometry(800, 800),
+          new THREE.MeshLambertMaterial({ map: tex })
+        );
+        mesh.rotation.x = -Math.PI / 2;
+        this.el.setObject3D("mesh", mesh);
+      },
+    });
+
+    AFRAME.registerComponent("palace-columns", {
+      init() {
+        const n = 8, r = 5.6;
+        for (let i = 0; i < n; i++) {
+          const a = ((i + 0.5) / n) * Math.PI * 2;
+          const col = document.createElement("a-cylinder");
+          col.setAttribute("radius", 0.32);
+          col.setAttribute("height", 4.8);
+          col.setAttribute("color", "#fbf9f4");
+          col.setAttribute("position", `${Math.sin(a) * r} 2.65 ${Math.cos(a) * r}`);
+          this.el.appendChild(col);
+        }
+      },
+    });
+
+    // Real head pose: the THREE camera is updated by WebXR in VR and by look-controls on desktop
+    function head() {
+      const cam = document.getElementById("cam").getObject3D("camera");
+      const pos = new THREE.Vector3(), fwd = new THREE.Vector3();
+      cam.getWorldPosition(pos);
+      cam.getWorldDirection(fwd);
+      fwd.setY(0).normalize();
+      return { pos, fwd };
+    }
+
+    let focused = null;
+
+    AFRAME.registerComponent("month-panel", {
+      init() {
+        this.home = null;
+        this.target = null;
+        this.el.addEventListener("click", () => {
+          if (dragged) return;
+          if (focused === this) return this.release();
+          if (focused) focused.release();
+          this.bringClose();
+        });
+      },
+      bringClose() {
+        const { pos: camPos, fwd } = head();
+        const pos = camPos.clone().addScaledVector(fwd, 4.2);
+        const dummy = new THREE.Object3D();
+        dummy.position.copy(pos);
+        dummy.lookAt(camPos.x, pos.y, camPos.z);
+        this.target = { pos, quat: dummy.quaternion.clone(), scale: 0.58 };
+        focused = this;
+      },
+      release() {
+        this.target = this.home;
+        focused = null;
+      },
+      tick(t, dt) {
+        const o = this.el.object3D;
+        if (!this.home) {
+          this.home = { pos: o.position.clone(), quat: o.quaternion.clone(), scale: o.scale.x };
+          this.target = this.home;
+        }
+        const k = 1 - Math.exp(-(dt || 16) / 120);
+        o.position.lerp(this.target.pos, k);
+        o.quaternion.slerp(this.target.quat, k);
+        const s = o.scale.x + (this.target.scale - o.scale.x) * k;
+        o.scale.set(s, s, s);
+      },
+    });
+
+    AFRAME.registerComponent("calendar-wall", {
+      init() {
+        const PW = 6.4, PH = 5.6, GAP = 0.6, Z = -22.4;
+        const cols = 4, rows = 3;
+        const left = -((cols * PW + (cols - 1) * GAP) / 2) + PW / 2;
+        const bottom = 2.4 + PH / 2;
+
+        this.panels = [];
+        for (let i = 0; i < 12; i++) {
+          const c = i % cols, r = rows - 1 - Math.floor(i / cols);
+          const canvas = document.createElement("canvas");
+          canvas.width = 1024; canvas.height = 896;
+          const tex = canvasTexture(canvas);
+
+          const group = new THREE.Group();
+          const face = new THREE.Mesh(new THREE.PlaneGeometry(PW, PH), new THREE.MeshBasicMaterial({ map: tex, fog: false }));
+          const frame = new THREE.Mesh(new THREE.PlaneGeometry(PW + 0.24, PH + 0.24), new THREE.MeshBasicMaterial({ color: "#d6cebd", fog: false }));
+          frame.position.z = -0.03;
+          group.add(frame, face);
+
+          const el = document.createElement("a-entity");
+          el.classList.add("clickable");
+          el.setAttribute("position", `${left + c * (PW + GAP)} ${bottom + r * (PH + GAP)} ${Z}`);
+          el.setAttribute("month-panel", "");
+          el.addEventListener("loaded", () => el.setObject3D("mesh", group), { once: true });
+          this.el.appendChild(el);
+          this.panels.push({ canvas, tex });
+        }
+
+        const tc = document.createElement("canvas");
+        tc.width = 2048; tc.height = 512;
+        this.titleTex = canvasTexture(tc);
+        this.titleCanvas = tc;
+        const title = new THREE.Mesh(
+          new THREE.PlaneGeometry(22, 5.5),
+          new THREE.MeshBasicMaterial({ map: this.titleTex, transparent: true, fog: false })
+        );
+        title.position.set(0, 27.2, Z);
+        this.el.object3D.add(title);
+
+        window.setFY = (fy) => this.render(fy);
+        this.render(initialFY());
+      },
+      render(fy) {
+        const months = fiscalMonths(fy), events = eventsByDate();
+        this.panels.forEach((p, i) => { drawMonth(p.canvas, months[i], events); p.tex.needsUpdate = true; });
+        drawTitle(this.titleCanvas, fy);
+        this.titleTex.needsUpdate = true;
+        document.querySelectorAll("#fy-buttons button").forEach((b) =>
+          b.setAttribute("aria-pressed", String(Number(b.dataset.fy) === fy)));
+        history.replaceState(null, "", `?fy=${fy}`);
+      },
+    });
+
+    // VR thumbsticks: left walks, right snap-turns
+    AFRAME.registerComponent("stick-move", {
+      init() {
+        this.move = { x: 0, y: 0 };
+        this.turned = false;
+        document.getElementById("left-hand").addEventListener("thumbstickmoved", (e) => {
+          this.move = { x: e.detail.x, y: e.detail.y };
+        });
+        document.getElementById("right-hand").addEventListener("thumbstickmoved", (e) => {
+          const x = e.detail.x;
+          if (!this.turned && Math.abs(x) > 0.7) {
+            this.el.object3D.rotation.y -= Math.sign(x) * (Math.PI / 6);
+            this.turned = true;
+          } else if (Math.abs(x) < 0.3) {
+            this.turned = false;
+          }
+        });
+      },
+      tick(t, dt) {
+        const { x, y } = this.move;
+        if (Math.hypot(x, y) < 0.15 || !dt) return;
+        const { fwd } = head();
+        const right = new THREE.Vector3().crossVectors(fwd, new THREE.Vector3(0, 1, 0));
+        const speed = 5 * (dt / 1000);
+        this.el.object3D.position.addScaledVector(fwd, -y * speed).addScaledVector(right, x * speed);
+      },
+    });
+
+    // ── HUD ──────────────────────────────────────────────────
+    function initialFY() {
+      const q = Number(new URLSearchParams(location.search).get("fy"));
+      return FY_CHOICES.includes(q) ? q : DEFAULT_FY;
+    }
+    document.getElementById("fy-buttons").innerHTML = FY_CHOICES
+      .map((fy) => `<button type="button" data-fy="${fy}" aria-pressed="false">FY${fy}</button>`).join("");
+    document.getElementById("fy-buttons").addEventListener("click", (e) => {
+      const fy = Number(e.target.dataset.fy);
+      if (fy && window.setFY) window.setFY(fy);
+    });
+    window.addEventListener("keydown", (e) => { if (e.key === "Escape" && focused) focused.release(); });
+
+    // On a flat screen, start looking up a little so the whole wall and title are in view
+    document.querySelector("a-scene").addEventListener("loaded", () => {
+      const look = document.getElementById("cam").components["look-controls"];
+      if (look && look.pitchObject) look.pitchObject.rotation.x = 0.4;
+    });
+  </script>
+</body>
+</html>

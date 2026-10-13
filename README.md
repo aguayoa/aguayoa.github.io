@@ -40,4 +40,11 @@ The homepage has a stats dashboard: active projects, steps done, reminders due t
 - **Reminder dots** show on days with reminders. Click the dots for an iMessage-style bubble.
 - **The tool bag** (stamped "PROJECTS", with fairies sparking around it) holds your projects. Click it and every project card flies up to wherever you're looking; click a card to edit it in place, or **+ New project** to add one. **Home** view walks you up to the bag and opens it.
 - When you enter the room with reminders due or newly added, the **Reminders** button rings like a phone for 15 seconds.
+- **Streak boxes** (Overview): hover for the streak's name and length; click to step into the **Gravity Room**.
+- **Phone:** drag to look, thumb joystick to walk, ▲▼ to fly, pinch to zoom in on the calendar; the bottom bar switches calendar views.
+
+## The Gravity Room (`/skills/`)
+
+A round training chamber with a gravity machine in the middle. The machine's screen shows the skill you're training now (more progress = more gravity, 10× to 500×). The board on the wall lists the skills you're chasing; tap **TRAIN ▶** to switch. The menu lets you add skills, set progress, and mark skills mastered. Skills are saved per account (`skills` table).
+
 - VR: open the page in your headset browser and press **VR**. Typing isn't possible in VR, so add things from a phone or computer and they sync.

@@ -629,14 +629,9 @@ function drawRingButton(canvas, count, t, ringing) {
 
 // ── Overview: the whole fiscal year, one row per month, every day side by side ──
 
-// Streak areas shown as boxes at the bottom of every day. They fill in from connected sources
-// (Strava, etc.) once the Skill room exists; until then they're empty outlines.
-const STREAK_AREAS = [
-  { id: "fitness", label: "Fitness", source: "Strava", color: "#fc4c02" },
-  { id: "mind", label: "Mind", source: "Meditation", color: "#6b46c1" },
-  { id: "learn", label: "Learning", source: "Courses", color: "#2b59c3" },
-  { id: "sleep", label: "Sleep", source: "Sleep tracker", color: "#1f8a4c" },
-];
+// Streak boxes at the bottom of every day, one per life area. They fill in from connected sources
+// (Strava, etc.); until then they're empty outlines. Clicking one opens the Gravity Room.
+const STREAK_AREAS = window.LIFE_AREAS;   // defined in assets/areas.js
 
 const PLAN = { W: 4096, H: 3072, pad: 36, labelW: 340, headH: 210, lanes: 2 };
 function plannerGeom() {

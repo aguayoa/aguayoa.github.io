@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
   <title>The Time Chamber</title>
   <script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
@@ -104,6 +104,39 @@
     .send, .ghost { font: inherit; font-weight: 700; cursor: pointer; padding: 10px 18px; border-radius: 999px; }
     .send { border: none; background: #0a84ff; color: #fff; align-self: flex-end; }
     .ghost { border: 1px solid #d6cfbf; background: #fff; color: #1b1b1a; }
+    .a-canvas { touch-action: none; }
+
+    /* Calendar bar: big buttons for the wall's views, always within thumb reach */
+    .cal-bar {
+      position: fixed; left: 50%; bottom: max(14px, env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 12;
+      display: flex; gap: 6px; padding: 6px; max-width: calc(100vw - 110px); overflow-x: auto;
+      background: rgba(255,253,248,.92); backdrop-filter: blur(6px); border: 1px solid #e3ddd0; border-radius: 999px;
+      box-shadow: 0 6px 24px rgba(0,0,0,.12); scrollbar-width: none;
+    }
+    .cal-bar::-webkit-scrollbar { display: none; }
+    .cal-bar button { font: inherit; font-weight: 700; font-size: .88rem; white-space: nowrap; cursor: pointer;
+      padding: 9px 14px; border-radius: 999px; border: none; background: transparent; color: #1b1b1a; }
+    .cal-bar button[aria-pressed="true"] { background: #2b59c3; color: #fff; }
+    .cal-bar .sep { width: 1px; background: #e3ddd0; margin: 4px 2px; flex: none; }
+
+    .streak-tip {
+      position: fixed; z-index: 30; pointer-events: none; padding: 8px 12px; border-radius: 10px;
+      background: #1b1b1a; color: #fff; font-size: .85rem; box-shadow: 0 8px 24px rgba(0,0,0,.25); max-width: 240px;
+    }
+    .streak-tip[hidden] { display: none; }
+    .streak-tip i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+    .streak-tip small { display: block; color: #b9b4a8; margin-top: 2px; }
+    .warp { position: fixed; inset: 0; z-index: 100; background: radial-gradient(circle, #fff 30%, #ffe3c2); opacity: 0; }
+    .warp[hidden] { display: none; }
+
+    @media (pointer: coarse) {
+      .seg button, .chip, .plain { padding: 9px 14px; }
+      .hud { width: 280px; }
+    }
+    @media (max-width: 640px) {
+      .cal-bar button { padding: 8px 10px; font-size: .8rem; }
+      .hud { top: max(10px, env(safe-area-inset-top)); left: 10px; max-width: calc(100vw - 20px); max-height: 60vh; }
+    }
     .keys { margin: 8px 0 0; padding-left: 18px; color: #4a4a46; line-height: 1.55; }
     kbd { font: 600 0.75rem ui-monospace, monospace; background: #fff; border: 1px solid #d6cfbf; border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; }
   </style>
@@ -139,7 +172,8 @@
         <ul class="keys">
           <li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> walk · <kbd>Shift</kbd> run</li>
           <li><kbd>Space</kbd>/<kbd>E</kbd> fly up · <kbd>Q</kbd> down</li>
-          <li>Drag to look · scroll to zoom (3rd person / overview)</li>
+          <li>Drag to look · scroll to zoom in on the calendar</li>
+          <li><strong>Phone:</strong> drag to look · thumb joystick to walk · ▲▼ to fly · pinch to zoom · bottom bar switches calendar views</li>
           <li><kbd>H</kbd> Home · <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> or <kbd>V</kbd> change view · <kbd>F</kbd> power up</li>
           <li>Click the calendar → <strong>Year</strong> / <strong>Overview</strong> / <strong>Reminders</strong> / <strong>To-do</strong> / <strong>Bring to front</strong>, <strong>−</strong> / <strong>+</strong>, or drag the blue corner handle to resize</li>
           <li>Click a month's name to bring it to the front · click a day for its summary (<kbd>Enter</kbd> saves) · click its dots for reminders · <kbd>Esc</kbd> closes</li>
@@ -156,6 +190,18 @@
       </details>
     </div>
   </details>
+
+  <nav class="cal-bar" id="cal-bar" aria-label="Calendar view">
+    <button type="button" data-layout="year">Year</button>
+    <button type="button" data-layout="list">Overview</button>
+    <button type="button" data-layout="reminders">Reminders</button>
+    <button type="button" data-layout="todo">To-do</button>
+    <span class="sep" aria-hidden="true"></span>
+    <button type="button" data-size="0.87" aria-label="Smaller calendar">−</button>
+    <button type="button" data-size="1.15" aria-label="Bigger calendar">+</button>
+  </nav>
+  <div class="streak-tip" id="streak-tip" hidden></div>
+  <div class="warp" id="warp" hidden></div>
 
   <div class="sheet" id="sheet" hidden>
     <div class="sheet-backdrop" id="sheet-backdrop"></div>
@@ -208,9 +254,11 @@
 
   <script src="../assets/config.js"></script>
   <script src="../assets/sample.js"></script>
+  <script src="../assets/areas.js"></script>
   <script src="../assets/store.js"></script>
   <script src="../assets/account.js"></script>
   <script src="../assets/project-editor.js"></script>
+  <script src="../assets/touch-controls.js"></script>
   <script src="draw.js"></script>
   <script src="world.js"></script>
   <script src="toolbag.js"></script>

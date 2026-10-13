@@ -4,6 +4,7 @@ const VIEWS = ["home", "first", "third", "overview"];
 const WALL_DEFAULT = { scale: 1, dist: 22.4, x: 0, y: 0 };
 const WALL_LIMITS = { scale: [0.4, 2.5], dist: [8, 70], x: [-40, 40], y: [-4, 20] };
 const START = { x: 0, z: -10 };
+const MAX_FOV = innerHeight > innerWidth ? 115 : 90;   // portrait phones see less side to side, so allow zooming out further
 
 // ── Saved settings (per browser) ──────────────────────────
 const store = {
@@ -28,6 +29,8 @@ const state = {
   facing: 0,
   look: { yaw: 0, pitch: 0.4 },                 // desktop camera
   zoom: { third: 5, overview: 48 },
+  fov: innerHeight > innerWidth ? 100 : 80,      // first person / home: pinch or scroll to zoom (wider start on portrait phones)
+  joy: { x: 0, y: 0, fly: 0 },                  // phone joystick + fly buttons
   vrYaw: 0,
   keys: new Set(),
   stick: { x: 0, y: 0 },                        // VR left stick: walk
@@ -89,16 +92,10 @@ AFRAME.registerComponent("time-chamber", {
     els.wall.addEventListener("wall-resize", (e) => resizeWall(e.detail.factor));
     els.wall.addEventListener("wall-resize-end", persist);
     els.wall.addEventListener("wall-reset", () => { state.wall = { ...WALL_DEFAULT }; applyWall(); persist(); });
-    els.wall.addEventListener("layout-changed", (e) => { state.layout = e.detail.layout; persist(); });
+    els.wall.addEventListener("layout-changed", (e) => { state.layout = e.detail.layout; markCalBar(state.layout); persist(); });
+    markCalBar(state.layout);
     els.wall.addEventListener("day-selected", (e) => openDay(e.detail.key));
-    els.wall.addEventListener("streak-click", (e) => {
-      const area = STREAK_AREAS.find((a) => a.id === e.detail.area);
-      const done = roomData.streaks[e.detail.key] && roomData.streaks[e.detail.key][area.id];
-      showBubble(`${area.label} streak · ${dayLabel(e.detail.key)}`, [
-        { title: done ? `${area.label} done ✅` : `No ${area.label.toLowerCase()} logged yet.`, color: area.color, note: !done },
-        { title: `This box fills in automatically from ${area.source} once it's connected in the Skill room (your mental gym). Coming soon.`, note: true },
-      ], e.detail.point);
-    });
+    els.wall.addEventListener("streak-click", (e) => enterGravityRoom(e.detail.area));
     els.wall.addEventListener("range-selected", (e) => openEventSheet({ start: e.detail.start, end: e.detail.end }));
     els.wall.addEventListener("event-open", (e) => {
       const ev = roomData.events.find((x) => x.id === e.detail.id);
@@ -136,25 +133,49 @@ AFRAME.registerComponent("time-chamber", {
     canvas.addEventListener("pointerdown", (e) => {
       pointer.downAt = [e.clientX, e.clientY];
       pointer.last = [e.clientX, e.clientY];
+      pointer.prev = [e.clientX, e.clientY];
       pointer.dragged = false;
       if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
     });
     window.addEventListener("pointermove", (e) => {
-      if (!pointer.downAt) return;
+      if (!pointer.downAt) { if (e.pointerType === "mouse") hoverStreak(e); return; }
       const dx = e.clientX - pointer.downAt[0], dy = e.clientY - pointer.downAt[1];
+      const mx = e.clientX - pointer.prev[0], my = e.clientY - pointer.prev[1];
+      pointer.prev = [e.clientX, e.clientY];
       if (Math.hypot(dx, dy) > 6) pointer.dragged = true;
+      if (TouchControls.pinching()) return;
       if (pointer.dragged && !els.wallC.resizing && !pointer.dayDrag) {
-        state.look.yaw -= e.movementX * 0.0045;
-        state.look.pitch = Math.max(-1.45, Math.min(1.45, state.look.pitch - e.movementY * 0.0045));
+        const k = 0.0045 * (state.fov / 80);           // finer control when zoomed in
+        state.look.yaw -= mx * k;
+        state.look.pitch = Math.max(-1.45, Math.min(1.45, state.look.pitch - my * k));
       }
     });
     window.addEventListener("pointerup", () => { pointer.downAt = null; });
+    const zoomBy = (factor) => {
+      if (state.view === "first" || state.view === "home") {
+        state.fov = clamp(state.fov * factor, [18, MAX_FOV]);
+      } else {
+        const lim = state.view === "third" ? [2.5, 25] : [15, 130];
+        state.zoom[state.view] = clamp(state.zoom[state.view] * factor, lim);
+      }
+    };
     canvas.addEventListener("wheel", (e) => {
-      if (state.view === "first") return;
       e.preventDefault();
-      const lim = state.view === "third" ? [2.5, 25] : [15, 130];
-      state.zoom[state.view] = clamp(state.zoom[state.view] * (1 + e.deltaY * 0.001), lim);
+      zoomBy(1 + e.deltaY * 0.001);
     }, { passive: false });
+    // two-finger pinch: spread to zoom in on the calendar, pinch to zoom out
+    let pinchFrom = null;
+    TouchControls.pinch(canvas, {
+      onStart: () => { pointer.dragged = true; pinchFrom = { fov: state.fov, zoom: { ...state.zoom } }; },
+      onChange: (ratio) => {
+        if (state.view === "first" || state.view === "home") state.fov = clamp(pinchFrom.fov / ratio, [18, MAX_FOV]);
+        else {
+          const lim = state.view === "third" ? [2.5, 25] : [15, 130];
+          state.zoom[state.view] = clamp(pinchFrom.zoom[state.view] / ratio, lim);
+        }
+      },
+    });
+    state.joy = TouchControls.joystick();
 
     window.addEventListener("keydown", (e) => {
       if (e.code === "Escape") {
@@ -213,7 +234,8 @@ AFRAME.registerComponent("time-chamber", {
     if (k.has("KeyE") || k.has("Space")) iy += 1;
     if (k.has("KeyQ") || k.has("KeyC")) iy -= 1;
     if (Math.hypot(state.stick.x, state.stick.y) > 0.15) { ix += state.stick.x; iz -= state.stick.y; }
-    iy += state.fly;
+    if (Math.hypot(state.joy.x, state.joy.y) > 0.1) { ix += state.joy.x; iz += state.joy.y; }
+    iy += state.fly + state.joy.fly;
 
     let yaw = state.look.yaw;
     if (vr) { const { fwd } = headPose(); yaw = Math.atan2(-fwd.x, -fwd.z); }
@@ -277,11 +299,56 @@ AFRAME.registerComponent("time-chamber", {
       rig.position.copy(eye);
       cam.position.set(0, 0, 0);
       cam.rotation.set(pitch, ly, 0);
+      const threeCam = els.cam.getObject3D("camera");
+      const fov = state.view === "first" || state.view === "home" ? state.fov : 80;
+      if (threeCam && Math.abs(threeCam.fov - fov) > 0.01) { threeCam.fov = fov; threeCam.updateProjectionMatrix(); }
     }
 
     animateBubble(t / 1000);
   },
 });
+
+// ── Streaks ───────────────────────────────────────────────
+// Length of the streak for `area` ending on `key` (consecutive days with that box filled)
+function streakLength(area, key) {
+  let n = 0;
+  const d = dateOf(key);
+  while (true) {
+    const k = keyOf(d.getFullYear(), d.getMonth(), d.getDate());
+    if (!(roomData.streaks[k] && roomData.streaks[k][area])) break;
+    n++;
+    d.setDate(d.getDate() - 1);
+  }
+  return n;
+}
+
+// Mouse hover over a streak box: show the streak's name and current length
+function hoverStreak(e) {
+  const tip = document.getElementById("streak-tip");
+  const wall = els.wallC;
+  let h = null;
+  if (wall && wall.layout === "list" && sheet.el.hidden) {
+    const hit = els.scene.components.raycaster.getIntersection(wall.planner.el);
+    const px = wall.plannerPixel(hit);
+    if (px) h = plannerHit(wall.planHits, px[0], px[1]);
+  }
+  if (!h || h.type !== "streak") { tip.hidden = true; return; }
+  const area = STREAK_AREAS.find((a) => a.id === h.area);
+  const n = streakLength(area.id, h.key);
+  tip.innerHTML = `<i style="background:${area.color}"></i><strong>${esc(area.label)}</strong> · ${n ? `${n}-day streak` : "no streak yet"}<small>Click to enter the Gravity Room</small>`;
+  tip.style.left = `${Math.min(e.clientX + 16, innerWidth - 260)}px`;
+  tip.style.top = `${e.clientY + 18}px`;
+  tip.hidden = false;
+}
+
+// White-out, then step through into the Gravity Room
+function enterGravityRoom(area) {
+  document.getElementById("streak-tip").hidden = true;
+  const flash = document.getElementById("warp");
+  flash.hidden = false;
+  flash.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 650, easing: "ease-in", fill: "forwards" })
+    .finished.then(() => { location.href = `../skills/?area=${encodeURIComponent(area)}`; });
+}
 
 // ── Actions ───────────────────────────────────────────────
 function setView(view) {
@@ -346,6 +413,7 @@ function resizeWall(factor) {
 }
 
 // ── Menu wiring ───────────────────────────────────────────
+if (innerWidth < 700) document.querySelector(".hud").removeAttribute("open");
 document.getElementById("views").addEventListener("click", (e) => {
   if (e.target.dataset.view) setView(e.target.dataset.view);
 });
@@ -356,6 +424,15 @@ document.getElementById("fy-buttons").addEventListener("click", (e) => {
   if (fy && els.wall) setFY(fy);
 });
 document.getElementById("power").addEventListener("click", () => setPowered(!state.powered));
+document.getElementById("cal-bar").addEventListener("click", (e) => {
+  const b = e.target.closest("button");
+  if (!b || !els.wallC) return;
+  if (b.dataset.layout) els.wallC.setLayout(b.dataset.layout);
+  if (b.dataset.size) resizeWall(Number(b.dataset.size));
+});
+function markCalBar(layout) {
+  document.querySelectorAll("#cal-bar [data-layout]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.layout === layout)));
+}
 document.getElementById("respawn").addEventListener("click", () => {
   state.player.set(START.x, groundAt(START.x, START.z), START.z);
   state.facing = 0;

@@ -33,6 +33,19 @@ create table if not exists public.events (
   check (end_date >= start_date)
 );
 
+-- ── Skills (Gravity Room): ones you're chasing, the one you're training now, ones you've mastered ──
+create table if not exists public.skills (
+  id          uuid primary key default gen_random_uuid(),
+  user_id     uuid not null default auth.uid() references auth.users on delete cascade,
+  name        text not null,
+  area        text not null default '',
+  status      text not null default 'aspire' check (status in ('aspire', 'current', 'mastered')),
+  progress    integer not null default 0 check (progress between 0 and 100),
+  note        text not null default '',
+  position    integer not null default 0,
+  created_at  timestamptz not null default now()
+);
+
 -- ── Reminders ───────────────────────────────────────────────
 create table if not exists public.reminders (
   id          uuid primary key default gen_random_uuid(),
@@ -80,6 +93,7 @@ create table if not exists public.admins (
 -- ── Row-level security ──────────────────────────────────────
 alter table public.projects  enable row level security;
 alter table public.events    enable row level security;
+alter table public.skills    enable row level security;
 alter table public.reminders enable row level security;
 alter table public.todos     enable row level security;
 alter table public.day_notes enable row level security;
@@ -89,7 +103,7 @@ alter table public.admins    enable row level security;
 do $$
 declare t text;
 begin
-  foreach t in array array['projects', 'events', 'reminders', 'todos', 'day_notes'] loop
+  foreach t in array array['projects', 'events', 'skills', 'reminders', 'todos', 'day_notes'] loop
     execute format('drop policy if exists "own rows" on public.%I', t);
     execute format(
       'create policy "own rows" on public.%I for all to authenticated

@@ -44,6 +44,14 @@ window.SAMPLE_EVENTS = [
   { title: "Launch day", start_date: sampleDay(3), end_date: sampleDay(3), color: "#1f8a4c", note: "" },
 ];
 
+window.SAMPLE_SKILLS = [
+  { name: "Data analytics with Python", area: "learn", status: "current", progress: 35, note: "Finish the pandas module this week" },
+  { name: "Run a half marathon", area: "fitness", status: "aspire", progress: 0, note: "" },
+  { name: "Speak Spanish conversationally", area: "learn", status: "aspire", progress: 0, note: "" },
+  { name: "Public speaking", area: "mind", status: "aspire", progress: 0, note: "" },
+  { name: "Meditate 20 minutes a day", area: "mind", status: "aspire", progress: 0, note: "" },
+];
+
 window.SAMPLE_TODOS = [
   { text: "Open the tool bag in the Time Chamber", done: false },
   { text: "Write a summary for today", done: false },

@@ -22,6 +22,7 @@
       projects: (window.SAMPLE_PROJECTS || []).map(stamp),
       reminders: (window.SAMPLE_REMINDERS || []).map(stamp),
       events: (window.SAMPLE_EVENTS || []).map(stamp),
+      skills: (window.SAMPLE_SKILLS || []).map(stamp),
       todos: (window.SAMPLE_TODOS || []).map(stamp),
       notes: {},
     };
@@ -30,6 +31,7 @@
   try { sandbox = JSON.parse(localStorage.getItem(SANDBOX_KEY)); } catch {}
   if (!sandbox) sandbox = seed();
   if (!sandbox.events) sandbox.events = (window.SAMPLE_EVENTS || []).map(stamp);   // sandboxes saved before events existed
+  if (!sandbox.skills) sandbox.skills = (window.SAMPLE_SKILLS || []).map(stamp);
   const saveSandbox = () => { try { localStorage.setItem(SANDBOX_KEY, JSON.stringify(sandbox)); } catch {} };
 
   // ── Collections (same API in both modes) ────────────────
@@ -168,6 +170,7 @@
 
     projects: collection("projects", "projects", byPosition),
     events: collection("events", "events", byStart),
+    skills: collection("skills", "skills", byPosition),
     reminders: collection("reminders", "reminders", byDue),
     todos: collection("todos", "todos", byPosition),
     notes,
@@ -192,6 +195,11 @@
         await this.events.create(row);
         count++;
       }
+      for (const sk of json.skills || []) {
+        const { id, user_id, created_at, ...row } = sk;
+        await this.skills.create(row);
+        count++;
+      }
       for (const r of json.reminders || []) {
         const { id, user_id, created_at, ...row } = r;
         await this.reminders.create(row);
@@ -211,6 +219,7 @@
       return {
         projects: await this.projects.list(),
         events: await this.events.list(),
+        skills: await this.skills.list(),
         reminders: await this.reminders.list(),
         todos: await this.todos.list(),
         notes: await notes.all(),

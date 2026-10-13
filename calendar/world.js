@@ -196,8 +196,11 @@ AFRAME.registerComponent("calendar-wall", {
 
     // Desktop drag-to-resize
     window.addEventListener("pointermove", (e) => {
-      if (!this.resizing || this.resizing.hand) return;
-      this.el.emit("wall-scale", { scale: this.el.object3D.scale.x * Math.exp((e.movementX - e.movementY) * 0.002) });
+      const last = this.lastPt;
+      this.lastPt = [e.clientX, e.clientY];
+      if (!this.resizing || this.resizing.hand || !last) return;
+      const mx = e.clientX - last[0], my = e.clientY - last[1];
+      this.el.emit("wall-scale", { scale: this.el.object3D.scale.x * Math.exp((mx - my) * 0.002) });
     });
     window.addEventListener("pointerup", () => this.endResize());
   },

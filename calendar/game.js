@@ -38,7 +38,8 @@ state.layout = ["year", "list", "reminders", "todo"].includes(saved.layout) ? sa
 const persist = () => store.save({ view: state.view, wall: state.wall, powered: state.powered, layout: state.layout });
 
 // Your data, loaded from the Store (Supabase when signed in, a browser sandbox otherwise)
-window.roomData = { reminders: [], todos: [], notes: {} };
+window.roomData = { reminders: [], todos: [], events: [], notes: {} };
+const eventsOn = (key) => (roomData.events || []).filter((e) => e.start_date <= key && key <= e.end_date);
 const clamp = (v, [lo, hi]) => Math.min(hi, Math.max(lo, v));
 
 // Real head pose: the THREE camera is driven by WebXR in VR and by this script on desktop
@@ -89,6 +90,13 @@ AFRAME.registerComponent("time-chamber", {
     els.wall.addEventListener("wall-reset", () => { state.wall = { ...WALL_DEFAULT }; applyWall(); persist(); });
     els.wall.addEventListener("layout-changed", (e) => { state.layout = e.detail.layout; persist(); });
     els.wall.addEventListener("day-selected", (e) => openDay(e.detail.key));
+    els.wall.addEventListener("range-selected", (e) => openEventSheet({ start: e.detail.start, end: e.detail.end }));
+    els.wall.addEventListener("event-open", (e) => {
+      const ev = roomData.events.find((x) => x.id === e.detail.id);
+      if (!ev) return;
+      if (els.scene.is("vr-mode")) return showBubble(fmtRange(ev.start_date, ev.end_date), [{ title: ev.title + (ev.note ? ` — ${ev.note}` : ""), color: ev.color }]);
+      openEventSheet({ event: ev });
+    });
     els.wall.addEventListener("reminder-bubble", (e) => showReminderBubble(e.detail.key, e.detail.point));
     els.wall.addEventListener("board-action", (e) => boardAction(e.detail.action, e.detail.id));
     els.bag = document.getElementById("toolbag").components["tool-bag"];
@@ -126,7 +134,7 @@ AFRAME.registerComponent("time-chamber", {
       if (!pointer.downAt) return;
       const dx = e.clientX - pointer.downAt[0], dy = e.clientY - pointer.downAt[1];
       if (Math.hypot(dx, dy) > 6) pointer.dragged = true;
-      if (pointer.dragged && !els.wallC.resizing) {
+      if (pointer.dragged && !els.wallC.resizing && !pointer.dayDrag) {
         state.look.yaw -= e.movementX * 0.0045;
         state.look.pitch = Math.max(-1.45, Math.min(1.45, state.look.pitch - e.movementY * 0.0045));
       }
@@ -351,10 +359,10 @@ const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "
 
 async function loadData() {
   try {
-    const [projects, reminders, todos, notes] = await Promise.all([
-      Store.projects.list(), Store.reminders.list(), Store.todos.list(), Store.notes.all(),
+    const [projects, reminders, todos, notes, events] = await Promise.all([
+      Store.projects.list(), Store.reminders.list(), Store.todos.list(), Store.notes.all(), Store.events.list(),
     ]);
-    Object.assign(window.roomData, { reminders, todos, notes });
+    Object.assign(window.roomData, { reminders, todos, notes, events });
     els.bag.setProjects(projects);
   } catch (e) {
     console.error(e);
@@ -368,6 +376,7 @@ async function run(task) {
 }
 const reloadReminders = async () => { roomData.reminders = await Store.reminders.list(); els.wallC.render(); };
 const reloadTodos = async () => { roomData.todos = await Store.todos.list(); els.wallC.render(); };
+const reloadEvents = async () => { roomData.events = await Store.events.list(); els.wallC.render(); };
 
 function showMode(s) {
   document.getElementById("mode-note").textContent = s.signedIn
@@ -472,10 +481,10 @@ function openProjectSheet(project, isNew) {
 
 // ── Day summary ───────────────────────────────────────────
 function openDay(key) {
-  const events = eventsByDate()[key] || [];
+  const events = eventsOn(key);
   const dayReminders = () => roomData.reminders.filter((r) => r.due_date === key);
   if (els.scene.is("vr-mode")) {
-    const items = [...events.map((e) => ({ title: e.title, note: true })), ...dayReminders()];
+    const items = [...events.map((e) => ({ title: `${e.title} · ${fmtRange(e.start_date, e.end_date)}`, note: true })), ...dayReminders()];
     if (roomData.notes[key]) items.unshift({ title: roomData.notes[key], note: true });
     return showBubble(formatDay(key), items.length ? items : [{ title: "No summary yet. Write one outside VR.", note: true }]);
   }
@@ -487,7 +496,10 @@ function openDay(key) {
     </header>
     <div class="sh-grid">
       <section class="sh-main">
-        ${events.length ? `<ul class="sh-events">${events.map((e) => `<li><span style="background:${esc(e.color || "#2b59c3")}"></span>${esc(e.title)}</li>`).join("")}</ul>` : ""}
+        <div class="sh-events">
+          ${events.map((e) => `<button type="button" class="ev-chip" style="--c:${esc(e.color || "#2b59c3")}" data-ev="${esc(e.id)}">${esc(e.title)} <small>${esc(fmtRange(e.start_date, e.end_date))}</small></button>`).join("")}
+          <button type="button" class="ev-chip add" id="day-add-event">+ Event</button>
+        </div>
         <textarea id="day-text" placeholder="How did today go? Wins, notes, what's next…">${esc(roomData.notes[key] || "")}</textarea>
         <p class="sh-hint"><kbd>Enter</kbd> saves · <kbd>Shift</kbd> + <kbd>Enter</kbd> new line · <kbd>Esc</kbd> closes</p>
       </section>
@@ -513,6 +525,14 @@ function openDay(key) {
     }
     els.wallC.selectedDay = null;
     els.wallC.render();
+  });
+
+  document.querySelector(".sh-events").addEventListener("click", async (e) => {
+    const chip = e.target.closest("[data-ev]"), add = e.target.closest("#day-add-event");
+    if (!chip && !add) return;
+    await closeSheet(true);
+    if (chip) openEventSheet({ event: roomData.events.find((x) => x.id === chip.dataset.ev) });
+    else openEventSheet({ start: key, end: key });
   });
 
   const text = document.getElementById("day-text");
@@ -544,6 +564,68 @@ function openDay(key) {
     if (t) run(async () => { const r = roomData.reminders.find((x) => x.id === t.dataset.toggleRem); await Store.reminders.update(r.id, { done: !r.done }); await reloadReminders(); refreshBubbles(); });
     if (d) run(async () => { await Store.reminders.remove(d.dataset.delRem); await reloadReminders(); refreshBubbles(); });
   });
+}
+
+// ── Event (single or multi-day) ───────────────────────────
+function openEventSheet({ start, end, event }) {
+  const ev = event || { title: "", start_date: start, end_date: end || start, color: REMINDER_COLORS[0], note: "" };
+  const nights = Math.round((dateOf(ev.end_date) - dateOf(ev.start_date)) / 86400000) + 1;
+  openSheet(`
+    <header class="sh-head">
+      <div><p class="sh-kicker">${event ? "Event" : "New event"}</p><h2 id="ev-heading">${esc(fmtRange(ev.start_date, ev.end_date))} · ${nights} day${nights === 1 ? "" : "s"}</h2></div>
+      <button type="button" class="sh-x" data-close aria-label="Close">✕</button>
+    </header>
+    <form class="rem-form big" id="ev-form" autocomplete="off">
+      <input id="ev-title" placeholder="What's happening? e.g. Going to Chile" value="${esc(ev.title)}" required>
+      <div class="rem-row">
+        <label class="date-field">From <input type="date" id="ev-start" value="${ev.start_date}" required></label>
+        <label class="date-field">To <input type="date" id="ev-end" value="${ev.end_date}" required></label>
+        <div class="swatches">${swatches(ev.color)}</div>
+      </div>
+      <input id="ev-note" placeholder="Notes (optional)" value="${esc(ev.note || "")}">
+      <div class="sh-actions">
+        ${event ? `<button type="button" class="ghost danger" id="ev-delete">Delete</button>` : `<button type="button" class="ghost" data-close>Cancel</button>`}
+        <button type="submit" class="send">${event ? "Save" : "Add event"}</button>
+      </div>
+      <p class="sh-hint"><kbd>Enter</kbd> saves · the event shows as a bar across those days on the calendar</p>
+    </form>`, async () => { els.wallC.clearSelection(); });
+
+  const title = document.getElementById("ev-title"), startIn = document.getElementById("ev-start"), endIn = document.getElementById("ev-end");
+  title.focus();
+  const refreshHeading = () => {
+    if (endIn.value < startIn.value) endIn.value = startIn.value;
+    const n = Math.round((dateOf(endIn.value) - dateOf(startIn.value)) / 86400000) + 1;
+    document.getElementById("ev-heading").textContent = `${fmtRange(startIn.value, endIn.value)} · ${n} day${n === 1 ? "" : "s"}`;
+    els.wallC.selection = { start: startIn.value, end: endIn.value };
+    els.wallC.render();
+  };
+  startIn.addEventListener("change", refreshHeading);
+  endIn.addEventListener("change", refreshHeading);
+  if (!event) refreshHeading();
+
+  document.getElementById("ev-form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const row = {
+      title: title.value.trim(),
+      start_date: startIn.value,
+      end_date: endIn.value < startIn.value ? startIn.value : endIn.value,
+      color: (sheet.body.querySelector("input[name=color]:checked") || {}).value || REMINDER_COLORS[0],
+      note: document.getElementById("ev-note").value.trim(),
+    };
+    if (!row.title) return;
+    run(async () => {
+      if (event) await Store.events.update(event.id, row); else await Store.events.create(row);
+      await reloadEvents();
+      closeSheet(false);
+    });
+  });
+  const del = document.getElementById("ev-delete");
+  if (del) del.addEventListener("click", () => run(async () => {
+    if (!confirm(`Delete "${event.title}"?`)) return;
+    await Store.events.remove(event.id);
+    await reloadEvents();
+    closeSheet(false);
+  }));
 }
 
 // ── New reminder ──────────────────────────────────────────

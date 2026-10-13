@@ -26,7 +26,7 @@ Live at **https://aguayoa.github.io/**
 | Homepage: projects (zoom in to edit), visitors (admin) | `/` | `index.html`, `assets/home.js`, `assets/home.css` |
 | The Time Chamber: calendar, reminders, to-do, projects tool bag | `/calendar/` | `calendar/` |
 
-Shared: `assets/config.js` (settings), `assets/store.js` (data layer), `assets/account.js` (sign-in), `assets/sample.js` (visitor sample content).
+Shared: `assets/config.js` (settings), `assets/store.js` (data layer), `assets/account.js` (sign-in), `assets/project-editor.js` (project editor), `assets/sample.js` (visitor sample content).
 
 ## Dashboard
 
@@ -34,7 +34,8 @@ The homepage has a stats dashboard: active projects, steps done, reminders due t
 
 ## The Time Chamber
 
-- **Click the calendar** for its toolbar: **Year**, **Month list**, **Reminders**, **To-do**, **Bring to front**, **−** / **+**, **Reset**, and a corner handle to drag-resize.
+- **Click the calendar** for its toolbar: **Year** (12-month grid), **Overview** (months with their day counts down the left, selected month large), **Reminders**, **To-do**, **Bring to front**, **−** / **+**, **Reset**, and a corner handle to drag-resize.
+- **Events:** drag across days (or Shift+click a second day) to create a multi-day event like a trip. Events draw as colored bars across the days they cover; click a bar to edit or delete it. Single-day events work the same from the day summary's **+ Event** button.
 - **Click a day** to open its summary full screen. **Enter** saves, **Shift + Enter** adds a new line. You can add reminders for that day there too.
 - **Reminder dots** show on days with reminders. Click the dots for an iMessage-style bubble.
 - **The tool bag** (stamped "PROJECTS", with fairies sparking around it) holds your projects. Click it and every project card flies up to wherever you're looking; click a card to edit it in place, or **+ New project** to add one. **Home** view walks you up to the bag and opens it.

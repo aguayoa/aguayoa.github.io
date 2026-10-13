@@ -21,24 +21,33 @@ function fiscalMonths(fy) {
   });
 }
 
-function eventsByDate() {
-  const map = {};
-  (window.EVENTS || []).forEach((e) => (map[e.date] ||= []).push(e));
-  return map;
-}
-
 function fitText(ctx, text, maxW) {
   if (ctx.measureText(text).width <= maxW) return text;
   while (text.length && ctx.measureText(text + "…").width > maxW) text = text.slice(0, -1);
   return text + "…";
 }
 
-function drawMonth(canvas, { year, month, quarter }, events, notes = {}, selectedKey = null, reminders = {}) {
+const daysInMonth = (year, month) => new Date(year, month + 1, 0).getDate();
+const fmtRange = (a, b) => {
+  const f = (k) => { const [y, m, d] = k.split("-").map(Number); return `${m}/${d}/${String(y).slice(2)}`; };
+  return a === b ? f(a) : `${f(a)} – ${f(b)}`;
+};
+
+// Month panel layout (canvas is 1024 × 896)
+const CAL = { x0: 40, top: 216, cw: (1024 - 80) / 7, rh: (896 - 216 - 24) / 6, lanes: 2, laneY: 50, laneH: 20, laneGap: 2 };
+
+// Draws one month. `events` are {id, title, start_date, end_date, color} spans; multi-day events become
+// bars across the days they cover (2 lanes per week, "+N more" past that). `hits` collects clickable
+// event-bar rectangles. `selection` = {start, end} keys highlights a day range being selected.
+function drawMonth(canvas, { year, month, quarter }, events = [], notes = {}, selectedKey = null, reminders = {}, hits = null, selection = null) {
   const ctx = canvas.getContext("2d");
   const W = canvas.width, H = canvas.height;
   const qc = Q_COLORS[quarter - 1];
   const now = new Date();
   const todayKey = keyOf(now.getFullYear(), now.getMonth(), now.getDate());
+  const { x0, cw, top, rh } = CAL;
+  const first = new Date(year, month, 1).getDay();
+  const days = daysInMonth(year, month);
 
   ctx.fillStyle = "#fffdf8";
   ctx.fillRect(0, 0, W, H);
@@ -53,14 +62,13 @@ function drawMonth(canvas, { year, month, quarter }, events, notes = {}, selecte
   const mw = ctx.measureText(MONTHS[month]).width;
   ctx.fillStyle = "#8a857a";
   ctx.font = `500 46px ${FONT}`;
-  ctx.fillText(String(year), 48 + mw + 22, 116);
+  ctx.fillText(`${year} · ${days} days`, 48 + mw + 22, 116);
 
   ctx.textAlign = "right";
   ctx.fillStyle = qc;
   ctx.font = `800 40px ${FONT}`;
   ctx.fillText(`Q${quarter}`, W - 48, 110);
 
-  const x0 = 40, cw = (W - 80) / 7;
   ctx.textAlign = "center";
   ctx.font = `600 30px ${FONT}`;
   ["SUN","MON","TUE","WED","THU","FRI","SAT"].forEach((d, i) => {
@@ -70,74 +78,128 @@ function drawMonth(canvas, { year, month, quarter }, events, notes = {}, selecte
   ctx.fillStyle = "#e6e0d3";
   ctx.fillRect(40, 204, W - 80, 3);
 
-  const top = 216, rh = (H - top - 24) / 6;
-  const first = new Date(year, month, 1).getDay();
-  const days = new Date(year, month + 1, 0).getDate();
+  const cellXY = (d) => { const idx = first + d - 1; return { c: idx % 7, r: Math.floor(idx / 7), x: x0 + (idx % 7) * cw, y: top + Math.floor(idx / 7) * rh }; };
+  const inSel = (key) => selection && key >= selection.start && key <= selection.end;
 
+  // ── day cells ──
   for (let d = 1; d <= days; d++) {
-    const idx = first + d - 1;
-    const c = idx % 7, r = Math.floor(idx / 7);
-    const x = x0 + c * cw, y = top + r * rh;
+    const { c, x, y } = cellXY(d);
     const key = keyOf(year, month, d);
     const weekend = c === 0 || c === 6;
 
-    ctx.fillStyle = weekend ? "#f6f2e9" : "#fffdf8";
+    ctx.fillStyle = inSel(key) ? "#dde6fb" : weekend ? "#f6f2e9" : "#fffdf8";
     ctx.fillRect(x + 3, y + 3, cw - 6, rh - 6);
-    ctx.strokeStyle = "#ece6da";
+    ctx.strokeStyle = inSel(key) ? "#2b59c3" : "#ece6da";
     ctx.lineWidth = 2;
     ctx.strokeRect(x + 3, y + 3, cw - 6, rh - 6);
 
     ctx.textAlign = "left";
-    ctx.font = `600 40px ${FONT}`;
+    ctx.font = `600 34px ${FONT}`;
+    let numRight;
     if (key === todayKey) {
       ctx.fillStyle = "#2b59c3";
       ctx.beginPath();
-      ctx.arc(x + 40, y + 40, 29, 0, Math.PI * 2);
+      ctx.arc(x + 34, y + 27, 21, 0, Math.PI * 2);
       ctx.fill();
       ctx.fillStyle = "#ffffff";
       ctx.textAlign = "center";
-      ctx.fillText(String(d), x + 40, y + 54);
+      ctx.fillText(String(d), x + 34, y + 39);
+      numRight = x + 58;
     } else {
       ctx.fillStyle = weekend ? "#a39d90" : "#1b1b1a";
-      ctx.fillText(String(d), x + 16, y + 54);
+      ctx.fillText(String(d), x + 14, y + 39);
+      numRight = x + 14 + ctx.measureText(String(d)).width;
     }
 
-    const dayEvents = (events[key] || []).slice(0, 2);
-    dayEvents.forEach((e, i) => {
-      const ey = y + 82 + i * 24;
-      ctx.fillStyle = e.color || "#2b59c3";
-      ctx.beginPath();
-      ctx.arc(x + 18, ey - 7, 6, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.textAlign = "left";
-      ctx.font = `600 20px ${FONT}`;
-      ctx.fillText(fitText(ctx, e.title, cw - 42), x + 30, ey);
-    });
-
+    // gold dot = this day has a written summary
     if (notes[key]) {
-      // note marker in the corner + first words of the summary
       ctx.fillStyle = "#b7791f";
       ctx.beginPath();
-      ctx.moveTo(x + cw - 4, y + 4);
-      ctx.lineTo(x + cw - 30, y + 4);
-      ctx.lineTo(x + cw - 4, y + 30);
+      ctx.arc(numRight + 13, y + 28, 6, 0, Math.PI * 2);
       ctx.fill();
-      if (dayEvents.length < 2) {
-        ctx.fillStyle = "#6b6b66";
-        ctx.textAlign = "left";
-        ctx.font = `italic 500 19px ${FONT}`;
-        ctx.fillText(fitText(ctx, notes[key], cw - 26), x + 12, y + 82 + dayEvents.length * 24);
-      }
     }
 
-    // reminder dots along the bottom of the day (click them for the iMessage bubble)
-    (reminders[key] || []).slice(0, 5).forEach((r, i) => {
+    // reminder dots in the top-right corner (click them for the iMessage bubble)
+    const rs = (reminders[key] || []).slice(0, 4);
+    rs.forEach((r, i) => {
       ctx.fillStyle = r.done ? "#c7c7cc" : r.color || "#0a84ff";
       ctx.beginPath();
-      ctx.arc(x + 22 + i * 24, y + rh - 20, 9, 0, Math.PI * 2);
+      ctx.arc(x + cw - 16 - i * 20, y + 20, 8, 0, Math.PI * 2);
       ctx.fill();
     });
+  }
 
+  // ── event bars ──
+  const monthStart = keyOf(year, month, 1), monthEnd = keyOf(year, month, days);
+  const spans = events
+    .filter((e) => e.start_date <= monthEnd && e.end_date >= monthStart)
+    .map((e) => {
+      const a = e.start_date < monthStart ? 1 : Number(e.start_date.slice(8));
+      const b = e.end_date > monthEnd ? days : Number(e.end_date.slice(8));
+      return { e, a, b, len: b - a };
+    })
+    .sort((p, q) => p.a - q.a || q.len - p.len || String(p.e.title).localeCompare(q.e.title));
+
+  // occupancy[row][lane] = 7 booleans (one per weekday column)
+  const occupancy = Array.from({ length: 6 }, () => Array.from({ length: CAL.lanes }, () => Array(7).fill(false)));
+  const overflow = {};               // "row,col" → count of events that didn't fit
+  const freeLane = (row, c1, c2) => {
+    for (let l = 0; l < CAL.lanes; l++) if (!occupancy[row][l].slice(c1, c2 + 1).some(Boolean)) return l;
+    return -1;
+  };
+
+  spans.forEach(({ e, a, b }) => {
+    // one lane for the whole event so it reads as a single bar across weeks
+    const segs = [];
+    for (let d = a; d <= b;) {
+      const { r, c } = cellXY(d);
+      const end = Math.min(b, d + (6 - c));
+      segs.push({ r, c1: c, c2: cellXY(end).c, startsHere: d === a });
+      d = end + 1;
+    }
+    let lane = -1;
+    for (let l = 0; l < CAL.lanes && lane < 0; l++) {
+      if (segs.every((s) => !occupancy[s.r][l].slice(s.c1, s.c2 + 1).some(Boolean))) lane = l;
+    }
+    if (lane < 0) {
+      segs.forEach((s) => { for (let c = s.c1; c <= s.c2; c++) overflow[`${s.r},${c}`] = (overflow[`${s.r},${c}`] || 0) + 1; });
+      return;
+    }
+    const color = e.color || "#2b59c3";
+    segs.forEach((s) => {
+      for (let c = s.c1; c <= s.c2; c++) occupancy[s.r][lane][c] = true;
+      const bx = x0 + s.c1 * cw + 6, bw = (s.c2 - s.c1 + 1) * cw - 12;
+      const by = top + s.r * rh + CAL.laneY + lane * (CAL.laneH + CAL.laneGap), bh = CAL.laneH;
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.roundRect(bx, by, bw, bh, 5);
+      ctx.fill();
+      const continuesLeft = !s.startsHere || (e.start_date < monthStart && s === segs[0]);
+      if (continuesLeft) { ctx.fillStyle = color; ctx.fillRect(bx - 6, by, 8, bh); }        // runs in from the previous week/month
+      if (s === segs[segs.length - 1] && e.end_date > monthEnd) ctx.fillRect(bx + bw - 2, by, 8, bh);
+      ctx.fillStyle = "#ffffff";
+      ctx.textAlign = "left";
+      ctx.font = `700 15px ${FONT}`;
+      ctx.fillText(fitText(ctx, e.title, bw - 14), bx + 7, by + 15);
+      if (hits) hits.push({ x: bx, y: by - 2, w: bw, h: bh + 4, eventId: e.id });
+    });
+  });
+
+  // third strip of each cell: "+N more" or the first words of the day's summary
+  for (let d = 1; d <= days; d++) {
+    const { c, r, x, y } = cellXY(d);
+    const key = keyOf(year, month, d);
+    const sy = y + CAL.laneY + CAL.lanes * (CAL.laneH + CAL.laneGap) + 10;
+    ctx.textAlign = "left";
+    if (overflow[`${r},${c}`]) {
+      ctx.fillStyle = "#6b6b66";
+      ctx.font = `700 15px ${FONT}`;
+      ctx.fillText(`+${overflow[`${r},${c}`]} more`, x + 10, sy);
+    } else if (notes[key]) {
+      ctx.fillStyle = "#8a857a";
+      ctx.font = `italic 500 15px ${FONT}`;
+      ctx.fillText(fitText(ctx, notes[key], cw - 20), x + 10, sy);
+    }
     if (key === selectedKey) {
       ctx.strokeStyle = "#2b59c3";
       ctx.lineWidth = 6;
@@ -147,20 +209,21 @@ function drawMonth(canvas, { year, month, quarter }, events, notes = {}, selecte
 }
 
 // What's at canvas pixel (cx, cy) of a month panel: { key: "YYYY-MM-DD", inDots } or null.
-// inDots is true when the click lands on the reminder-dot strip at the bottom of the day.
+// inDots is true when the click lands on the reminder dots in the day's top-right corner.
 const HEADER_BOTTOM = 200;
 function cellAt({ year, month }, cx, cy) {
-  const x0 = 40, top = 216, cw = (1024 - 80) / 7, rh = (896 - top - 24) / 6;
+  const { x0, top, cw, rh } = CAL;
   if (cy < top || cx < x0 || cx > 1024 - x0) return null;
   const c = Math.floor((cx - x0) / cw), r = Math.floor((cy - top) / rh);
   if (r > 5) return null;
   const d = r * 7 + c - new Date(year, month, 1).getDay() + 1;
-  if (d < 1 || d > new Date(year, month + 1, 0).getDate()) return null;
-  return { key: keyOf(year, month, d), inDots: cy > top + (r + 1) * rh - 42 };
+  if (d < 1 || d > daysInMonth(year, month)) return null;
+  const inX = cx - (x0 + c * cw), inY = cy - (top + r * rh);
+  return { key: keyOf(year, month, d), inDots: inY < 34 && inX > cw - 84 };
 }
 const dayAt = (m, cx, cy) => (cellAt(m, cx, cy) || {}).key || null;
 
-// Month tab for the collapsed "Month list" view
+// Month tab for the Overview layout: name, year, quarter and how many days it has
 function drawTab(canvas, { year, month, quarter }, selected) {
   const ctx = canvas.getContext("2d");
   const W = canvas.width, H = canvas.height;
@@ -171,12 +234,12 @@ function drawTab(canvas, { year, month, quarter }, selected) {
   ctx.textBaseline = "middle";
   ctx.textAlign = "left";
   ctx.fillStyle = selected ? "#ffffff" : "#1b1b1a";
-  ctx.font = `700 92px ${FONT}`;
+  ctx.font = `700 82px ${FONT}`;
   ctx.fillText(MONTHS[month], 60, H / 2 + 4);
   ctx.textAlign = "right";
   ctx.fillStyle = selected ? "#dbe5ff" : "#8a857a";
-  ctx.font = `500 64px ${FONT}`;
-  ctx.fillText(`${year} · Q${quarter}`, W - 40, H / 2 + 4);
+  ctx.font = `500 46px ${FONT}`;
+  ctx.fillText(`${daysInMonth(year, month)} days · ${year} · Q${quarter}`, W - 40, H / 2 + 4);
 }
 
 // Toolbar button on the wall

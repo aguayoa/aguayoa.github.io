@@ -20,6 +20,19 @@ create table if not exists public.projects (
   updated_at  timestamptz not null default now()
 );
 
+-- ── Events (single or multi-day, e.g. a trip) ──────────────
+create table if not exists public.events (
+  id          uuid primary key default gen_random_uuid(),
+  user_id     uuid not null default auth.uid() references auth.users on delete cascade,
+  title       text not null,
+  start_date  date not null,
+  end_date    date not null,
+  color       text not null default '#2b59c3',
+  note        text not null default '',
+  created_at  timestamptz not null default now(),
+  check (end_date >= start_date)
+);
+
 -- ── Reminders ───────────────────────────────────────────────
 create table if not exists public.reminders (
   id          uuid primary key default gen_random_uuid(),
@@ -66,6 +79,7 @@ create table if not exists public.admins (
 
 -- ── Row-level security ──────────────────────────────────────
 alter table public.projects  enable row level security;
+alter table public.events    enable row level security;
 alter table public.reminders enable row level security;
 alter table public.todos     enable row level security;
 alter table public.day_notes enable row level security;
@@ -75,7 +89,7 @@ alter table public.admins    enable row level security;
 do $$
 declare t text;
 begin
-  foreach t in array array['projects', 'reminders', 'todos', 'day_notes'] loop
+  foreach t in array array['projects', 'events', 'reminders', 'todos', 'day_notes'] loop
     execute format('drop policy if exists "own rows" on public.%I', t);
     execute format(
       'create policy "own rows" on public.%I for all to authenticated

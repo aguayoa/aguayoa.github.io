@@ -126,8 +126,13 @@ AFRAME.registerComponent("calendar-wall", {
       const group = new THREE.Group();
       group.add(frame, face);
       const el = this.addClickable(group, (e) => this.onMonthClick(i, face, e));
-      return { canvas, tex, item: this.track(el, this.gridPos(i), 1) };
+      el.addEventListener("mousedown", (e) => this.startDayDrag(i, face, e));
+      return { canvas, tex, face, hits: [], item: this.track(el, this.gridPos(i), 1) };
     });
+    this.selection = null;      // {start, end} day keys while a range is being selected
+    this.anchorDay = null;      // last clicked day, for Shift+click ranges
+    this.suppressClickUntil = 0;
+    window.addEventListener("pointerup", () => this.endDayDrag());
 
     // Month tabs for the list layout
     this.tabs = Array.from({ length: 12 }, (_, i) => {
@@ -147,7 +152,7 @@ AFRAME.registerComponent("calendar-wall", {
     // Toolbar (above the calendar) — hidden until the calendar is clicked
     const buttons = [
       { id: "year", label: "Year", w: 2.6 },
-      { id: "list", label: "Month list", w: 4.0 },
+      { id: "list", label: "Overview", w: 3.6 },
       { id: "reminders", label: "Reminders", w: 3.8 },
       { id: "todo", label: "To-do", w: 2.8 },
       { id: "front", label: "Bring to front", w: 4.8 },
@@ -219,6 +224,8 @@ AFRAME.registerComponent("calendar-wall", {
       o.scale.setScalar(o.scale.x + (scale - o.scale.x) * k);
       o.visible = o.scale.x > HIDDEN * 20;
     });
+
+    this.updateDayDrag();
 
     // Ringing Reminders button (on entering the room with new reminders)
     if (this.ring) {
@@ -350,14 +357,17 @@ AFRAME.registerComponent("calendar-wall", {
     if (id === "close") this.showControls(false);
   },
 
-  // Header → bring the month to the front (or send it back). Day → select it and open its summary.
-  // Reminder dot → iMessage bubble.
+  // Header → bring the month to the front (or send it back). Event bar → open that event.
+  // Reminder dot → iMessage bubble. Shift+click → range from the last clicked day. Day → its summary.
   onMonthClick(i, face, e) {
     this.showControls(true);
+    if (this.el.sceneEl.time < this.suppressClickUntil) return;
     const hit = e.detail.intersection;
     if (!hit || hit.object !== face || !hit.uv) return;
     const cx = hit.uv.x * 1024, cy = (1 - hit.uv.y) * 896;
     if (cy < HEADER_BOTTOM) return this.toggleFront(i);
+    const bar = this.months[i].hits.find((h) => cx >= h.x && cx <= h.x + h.w && cy >= h.y && cy <= h.y + h.h);
+    if (bar) return this.el.emit("event-open", { id: bar.eventId, point: hit.point.clone() });
     const cell = cellAt(fiscalMonths(this.fy)[i], cx, cy);
     if (!cell) return;
     const key = cell.key;
@@ -366,10 +376,82 @@ AFRAME.registerComponent("calendar-wall", {
       this.el.emit("reminder-bubble", { key, point: hit.point.clone() });
       return;
     }
+    const me = e.detail.mouseEvent;
+    if (me && me.shiftKey && this.anchorDay && this.anchorDay !== key) {
+      return this.selectRange(this.anchorDay, key);
+    }
+    this.anchorDay = key;
     this.selected = i;
     this.selectedDay = key;
     this.render();
     this.el.emit("day-selected", { key });
+  },
+
+  // ── Drag across days to make a multi-day event ──────────
+  startDayDrag(i, face, e) {
+    const hit = e.detail.intersection;
+    if (!hit || hit.object !== face || !hit.uv) return;
+    const cx = hit.uv.x * 1024, cy = (1 - hit.uv.y) * 896;
+    if (cy < HEADER_BOTTOM) return;
+    if (this.months[i].hits.some((h) => cx >= h.x && cx <= h.x + h.w && cy >= h.y && cy <= h.y + h.h)) return;
+    const cell = cellAt(fiscalMonths(this.fy)[i], cx, cy);
+    if (!cell) return;
+    if (cell.inDots && (window.roomData.reminders || []).some((r) => r.due_date === cell.key)) return;   // that's a dot click
+    const cursorEl = e.detail.cursorEl && e.detail.cursorEl !== this.el.sceneEl ? e.detail.cursorEl : this.el.sceneEl;
+    this.dayDrag = { startKey: cell.key, lastKey: cell.key, cursorEl };
+    pointer.dayDrag = true;
+    if (cursorEl !== this.el.sceneEl) cursorEl.addEventListener("mouseup", () => this.endDayDrag(), { once: true });
+  },
+
+  // Which day is under the cursor right now, across all month panels
+  dayUnderCursor(cursorEl) {
+    const rc = cursorEl.components.raycaster;
+    if (!rc) return null;
+    const months = fiscalMonths(this.fy);
+    for (let j = 0; j < 12; j++) {
+      const m = this.months[j];
+      if (m.item.el.object3D.scale.x < 0.01) continue;
+      const hit = rc.getIntersection(m.item.el);
+      if (!hit || hit.object !== m.face || !hit.uv) continue;
+      const cell = cellAt(months[j], hit.uv.x * 1024, (1 - hit.uv.y) * 896);
+      if (cell) return cell.key;
+    }
+    return null;
+  },
+
+  updateDayDrag() {
+    const d = this.dayDrag;
+    if (!d) return;
+    const key = this.dayUnderCursor(d.cursorEl);
+    if (!key || key === d.lastKey) return;
+    d.lastKey = key;
+    this.selection = key < d.startKey ? { start: key, end: d.startKey } : { start: d.startKey, end: key };
+    this.render();
+  },
+
+  endDayDrag() {
+    const d = this.dayDrag;
+    if (!d) return;
+    this.dayDrag = null;
+    pointer.dayDrag = false;
+    if (d.lastKey !== d.startKey) {
+      this.suppressClickUntil = this.el.sceneEl.time + 400;   // the drag's release shouldn't also count as a click
+      this.selectRange(d.startKey, d.lastKey);
+    } else if (this.selection) {
+      this.clearSelection();
+    }
+  },
+
+  selectRange(a, b) {
+    this.selection = a <= b ? { start: a, end: b } : { start: b, end: a };
+    this.render();
+    this.el.emit("range-selected", { ...this.selection });
+  },
+
+  clearSelection() {
+    if (!this.selection) return;
+    this.selection = null;
+    this.render();
   },
 
   onBoardClick(face, e) {
@@ -420,10 +502,14 @@ AFRAME.registerComponent("calendar-wall", {
 
   render() {
     const data = window.roomData || {};
-    const months = fiscalMonths(this.fy), events = eventsByDate(), notes = data.notes || {};
+    const months = fiscalMonths(this.fy), events = data.events || [], notes = data.notes || {};
     const reminders = {};
     (data.reminders || []).forEach((r) => (reminders[r.due_date] ||= []).push(r));
-    this.months.forEach((m, i) => { drawMonth(m.canvas, months[i], events, notes, this.selectedDay, reminders); m.tex.needsUpdate = true; });
+    this.months.forEach((m, i) => {
+      m.hits = [];
+      drawMonth(m.canvas, months[i], events, notes, this.selectedDay, reminders, m.hits, this.selection);
+      m.tex.needsUpdate = true;
+    });
     if (this.layout === "reminders" || this.layout === "todo") this.renderBoard();
     drawTitle(this.titleCanvas, this.fy);
     this.titleTex.needsUpdate = true;

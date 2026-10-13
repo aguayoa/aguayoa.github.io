@@ -21,6 +21,7 @@
     return {
       projects: (window.SAMPLE_PROJECTS || []).map(stamp),
       reminders: (window.SAMPLE_REMINDERS || []).map(stamp),
+      events: (window.SAMPLE_EVENTS || []).map(stamp),
       todos: (window.SAMPLE_TODOS || []).map(stamp),
       notes: {},
     };
@@ -28,6 +29,7 @@
   let sandbox;
   try { sandbox = JSON.parse(localStorage.getItem(SANDBOX_KEY)); } catch {}
   if (!sandbox) sandbox = seed();
+  if (!sandbox.events) sandbox.events = (window.SAMPLE_EVENTS || []).map(stamp);   // sandboxes saved before events existed
   const saveSandbox = () => { try { localStorage.setItem(SANDBOX_KEY, JSON.stringify(sandbox)); } catch {} };
 
   // ── Collections (same API in both modes) ────────────────
@@ -76,6 +78,7 @@
   }
 
   const byPosition = (a, b) => (a.position ?? 0) - (b.position ?? 0) || String(a.created_at).localeCompare(String(b.created_at));
+  const byStart = (a, b) => a.start_date.localeCompare(b.start_date) || a.end_date.localeCompare(b.end_date);
   const byDue = (a, b) => a.due_date.localeCompare(b.due_date) || String(a.due_time || "99").localeCompare(String(b.due_time || "99"));
 
   const notes = {
@@ -164,6 +167,7 @@
     },
 
     projects: collection("projects", "projects", byPosition),
+    events: collection("events", "events", byStart),
     reminders: collection("reminders", "reminders", byDue),
     todos: collection("todos", "todos", byPosition),
     notes,
@@ -181,6 +185,11 @@
       for (const p of json.projects || []) {
         const { id, user_id, created_at, updated_at, ...row } = p;
         await this.projects.create(row);
+        count++;
+      }
+      for (const ev of json.events || []) {
+        const { id, user_id, created_at, ...row } = ev;
+        await this.events.create(row);
         count++;
       }
       for (const r of json.reminders || []) {
@@ -201,6 +210,7 @@
     async exportData() {
       return {
         projects: await this.projects.list(),
+        events: await this.events.list(),
         reminders: await this.reminders.list(),
         todos: await this.todos.list(),
         notes: await notes.all(),

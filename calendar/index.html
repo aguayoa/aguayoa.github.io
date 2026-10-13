@@ -69,9 +69,12 @@
     }
     .sh-main textarea:focus, .rem-form input:focus { outline: 2px solid #2b59c3; outline-offset: 1px; }
     .sh-hint { margin: 10px 0 0; color: #8a857a; font-size: .85rem; }
-    .sh-events { list-style: none; margin: 0 0 12px; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
-    .sh-events li { display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: .9rem; padding: 4px 10px; border-radius: 999px; background: #f2eee5; }
-    .sh-events span { width: 9px; height: 9px; border-radius: 50%; }
+    .sh-events { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; }
+    .ev-chip { font: inherit; font-weight: 700; font-size: .88rem; cursor: pointer; border: none; color: #fff; background: var(--c, #2b59c3); padding: 6px 14px; border-radius: 999px; }
+    .ev-chip small { font-weight: 500; opacity: .85; margin-left: 4px; }
+    .ev-chip.add { background: #f2eee5; color: #1b1b1a; }
+    .date-field { display: flex; align-items: center; gap: 6px; color: #6b6b66; font-weight: 600; font-size: .85rem; }
+    .ghost.danger { color: #c0392b; border-color: #e8b4ad; }
     .sh-side h3 { margin: 0 0 10px; font-size: .75rem; text-transform: uppercase; letter-spacing: .06em; color: #8a857a; }
     .sh-actions { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 16px; }
 
@@ -116,7 +119,7 @@
         <button type="button" data-view="home">Home</button>
         <button type="button" data-view="first">First person</button>
         <button type="button" data-view="third">Third person</button>
-        <button type="button" data-view="overview">Overview</button>
+        <button type="button" data-view="overview">Bird's eye</button>
       </div>
 
       <span class="label">Year</span>
@@ -128,7 +131,7 @@
         <button type="button" class="plain" id="respawn">Back to start</button>
       </div>
 
-      <p class="tip">Click the calendar for <strong>Year</strong>, <strong>Month list</strong>, <strong>Reminders</strong> and <strong>To-do</strong>. Click a day to write its summary; click a day's colored dots to see its reminders.<br><strong>Home</strong> brings your projects out of the tool bag.</p>
+      <p class="tip">Click the calendar for <strong>Year</strong>, <strong>Overview</strong>, <strong>Reminders</strong> and <strong>To-do</strong>. Click a day to write its summary; drag across days to make an event; click a day's colored dots to see its reminders.<br><strong>Home</strong> brings your projects out of the tool bag.</p>
       <p class="tip" id="mode-note"></p>
 
       <details class="sub">
@@ -138,8 +141,9 @@
           <li><kbd>Space</kbd>/<kbd>E</kbd> fly up · <kbd>Q</kbd> down</li>
           <li>Drag to look · scroll to zoom (3rd person / overview)</li>
           <li><kbd>H</kbd> Home · <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> or <kbd>V</kbd> change view · <kbd>F</kbd> power up</li>
-          <li>Click the calendar → <strong>Year</strong> / <strong>Month list</strong> / <strong>Bring to front</strong>, <strong>−</strong> / <strong>+</strong>, or drag the blue corner handle to resize</li>
+          <li>Click the calendar → <strong>Year</strong> / <strong>Overview</strong> / <strong>Reminders</strong> / <strong>To-do</strong> / <strong>Bring to front</strong>, <strong>−</strong> / <strong>+</strong>, or drag the blue corner handle to resize</li>
           <li>Click a month's name to bring it to the front · click a day for its summary (<kbd>Enter</kbd> saves) · click its dots for reminders · <kbd>Esc</kbd> closes</li>
+          <li><strong>Events:</strong> drag across days (or <kbd>Shift</kbd>+click a second day) to make a multi-day event · click an event bar to edit it</li>
           <li>Click the tool bag to open or close it · click a project card for details</li>
         </ul>
         <ul class="keys">
@@ -207,7 +211,6 @@
   <script src="../assets/store.js"></script>
   <script src="../assets/account.js"></script>
   <script src="../assets/project-editor.js"></script>
-  <script src="../assets/events.js"></script>
   <script src="draw.js"></script>
   <script src="world.js"></script>
   <script src="toolbag.js"></script>

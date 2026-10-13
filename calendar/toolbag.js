@@ -1,6 +1,7 @@
 // A floating 1960s leather tool bag that holds the projects.
 // Click it to open: the frame jaws spread and a card for each project rises out.
 // Click a card to bring that project's details up in front of you.
+// Home view: the cards fly out larger, in an arc in front of you, trailing sparkles.
 
 const STATUS_COLORS = { active: "#1f8a4c", planning: "#b7791f", talks: "#6b46c1", paused: "#718096", done: "#2b59c3" };
 const EMOJI_FONT = "'Segoe UI Emoji', 'Apple Color Emoji', 'Noto Color Emoji', sans-serif";
@@ -134,7 +135,7 @@ function drawProjectDetail(canvas, p) {
 
   ctx.fillStyle = "#8a857a";
   ctx.font = `500 28px ${FONT}`;
-  ctx.fillText("Click this card to put it back", M, H - 40);
+  ctx.fillText("Click this card to put it back · edit projects on your Aware Life homepage", M, H - 40);
 }
 
 function leatherTexture() {
@@ -185,8 +186,12 @@ AFRAME.registerComponent("tool-bag", {
     this.el.appendChild(bagEl);
     this.bagEl = bagEl;
 
-    this.buildCards();
+    this.cards = [];
+    this.openTime = -1;
+    this.homeMode = false;
     this.buildShadow();
+    this.buildSparkles();
+    this.setProjects(window.SAMPLE_PROJECTS || []);
   },
 
   buildBag() {
@@ -297,8 +302,9 @@ AFRAME.registerComponent("tool-bag", {
     return g;
   },
 
-  buildCards() {
-    const projects = window.PROJECTS || [];
+  // Replace the cards with a new list of projects
+  setProjects(projects) {
+    this.cards.forEach((c) => c.el.remove());
     const n = projects.length;
     this.cards = projects.map((p, i) => {
       const canvas = makeCanvas(768, 480), tex = canvasTexture(canvas);
@@ -315,19 +321,80 @@ AFRAME.registerComponent("tool-bag", {
         el.setObject3D("mesh", group);
         el.object3D.scale.setScalar(HIDDEN);
       }, { once: true });
-      el.addEventListener("click", () => { if (!pointer.dragged) this.showDetail(p); });
+      el.addEventListener("click", () => { if (!pointer.dragged) this.showDetail(p, el); });
       this.el.appendChild(el);
 
       // fanned out in an arc above the open bag, tilted toward the middle
       const t = n > 1 ? i / (n - 1) - 0.5 : 0;
+      const spread = Math.min(3.4, 0.95 * n);
       const out = {
-        pos: new THREE.Vector3(t * 3.4, 1.05 + (0.25 - Math.abs(t) * 0.5) * 0.6, 0.15 - Math.abs(t) * 0.5),
+        pos: new THREE.Vector3(t * spread, 1.05 + (0.25 - Math.abs(t) * 0.5) * 0.6, 0.15 - Math.abs(t) * 0.5),
         rot: -t * 0.7,
+        scale: 1,
       };
-      const tucked = { pos: new THREE.Vector3(t * 0.6, 0.35, 0), rot: 0 };
-      return { el, out, tucked, delay: i * 0.08, p };
+      // Home view: bigger, wider arc, pulled toward you
+      const homeSpread = Math.min(5.6, 1.5 * n);
+      const home = {
+        pos: new THREE.Vector3(t * homeSpread, 1.35 + (0.25 - Math.abs(t)) * 0.5, 1.5 - Math.abs(t) * 1.4),
+        rot: -t * 0.9,
+        scale: 1.7,
+      };
+      const tucked = { pos: new THREE.Vector3(t * 0.6, 0.35, 0), rot: 0, scale: HIDDEN };
+      return { el, out, home, tucked, delay: i * 0.09, p };
     });
-    this.openTime = -1;
+  },
+
+  setHome(on) {
+    this.homeMode = on;
+    if (on && !this.open) this.toggle();
+    if (!on && this.open) this.toggle();
+  },
+
+  // Gold sparkles that trail the cards as they fly
+  buildSparkles() {
+    const N = 400;
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(N * 3), 3));
+    geo.setAttribute("color", new THREE.BufferAttribute(new Float32Array(N * 3), 3));
+    this.sparkles = {
+      N, next: 0, geo,
+      vel: new Float32Array(N * 3),
+      life: new Float32Array(N),
+      points: new THREE.Points(geo, new THREE.PointsMaterial({
+        size: 0.07, vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
+      })),
+    };
+    this.sparkles.points.frustumCulled = false;
+    this.el.object3D.add(this.sparkles.points);
+  },
+
+  emitSparkle(pos, spread = 0.25) {
+    const sp = this.sparkles, i = sp.next;
+    sp.next = (i + 1) % sp.N;
+    const P = sp.geo.attributes.position.array;
+    P[i * 3] = pos.x + (Math.random() - 0.5) * spread;
+    P[i * 3 + 1] = pos.y + (Math.random() - 0.5) * spread;
+    P[i * 3 + 2] = pos.z + (Math.random() - 0.5) * spread;
+    sp.vel[i * 3] = (Math.random() - 0.5) * 0.6;
+    sp.vel[i * 3 + 1] = Math.random() * 0.5 + 0.1;
+    sp.vel[i * 3 + 2] = (Math.random() - 0.5) * 0.6;
+    sp.life[i] = 1;
+  },
+
+  updateSparkles(step) {
+    const sp = this.sparkles;
+    const P = sp.geo.attributes.position.array, C = sp.geo.attributes.color.array;
+    for (let i = 0; i < sp.N; i++) {
+      if (sp.life[i] <= 0) { C[i * 3] = C[i * 3 + 1] = C[i * 3 + 2] = 0; continue; }
+      sp.life[i] -= step * 1.2;
+      const a = Math.max(0, sp.life[i]);
+      P[i * 3] += sp.vel[i * 3] * step;
+      P[i * 3 + 1] += sp.vel[i * 3 + 1] * step;
+      P[i * 3 + 2] += sp.vel[i * 3 + 2] * step;
+      C[i * 3] = 1 * a; C[i * 3 + 1] = 0.82 * a; C[i * 3 + 2] = 0.35 * a;
+    }
+    sp.geo.attributes.position.needsUpdate = true;
+    sp.geo.attributes.color.needsUpdate = true;
   },
 
   buildShadow() {
@@ -377,17 +444,23 @@ AFRAME.registerComponent("tool-bag", {
       const co = c.el.object3D;
       if (!c.el.hasLoaded) return;
       const out = this.open && since > 0.25 + c.delay;
-      const goal = out ? c.out : c.tucked;
+      const goal = out ? (this.homeMode ? c.home : c.out) : c.tucked;
+      const before = co.position.clone();
       co.position.lerp(goal.pos, k);
       co.rotation.y += (goal.rot - co.rotation.y) * k;
-      const s = co.scale.x + ((out ? 1 : HIDDEN) - co.scale.x) * k;
+      const s = co.scale.x + (goal.scale - co.scale.x) * k;
       co.scale.setScalar(s);
       co.visible = s > 0.01;
+      // sparkle trail while a card is flying
+      const speed = before.distanceTo(co.position) / step;
+      if (out && speed > 0.4) for (let j = 0; j < (this.homeMode ? 3 : 1); j++) this.emitSparkle(co.position, 0.3 * s);
     });
+    this.updateSparkles(step);
+    this.animateDetail(sec);
   },
 
   // ── Project detail card ──────────────────────────────────
-  showDetail(p) {
+  showDetail(p, fromEl) {
     if (!this.detail) {
       const canvas = makeCanvas(1024, 1400), tex = canvasTexture(canvas);
       const el = document.createElement("a-entity");
@@ -395,7 +468,12 @@ AFRAME.registerComponent("tool-bag", {
       el.addEventListener("loaded", () => el.setObject3D("mesh", new THREE.Mesh(new THREE.PlaneGeometry(1.6, 2.19), basic({ map: tex }))), { once: true });
       el.addEventListener("click", () => { if (!pointer.dragged) this.hideDetail(); });
       this.el.sceneEl.appendChild(el);
-      this.detail = { el, canvas, tex };
+      const ring = new THREE.Mesh(
+        new THREE.RingGeometry(0.9, 1.25, 64),
+        new THREE.MeshBasicMaterial({ color: "#ffd84a", transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false })
+      );
+      this.el.sceneEl.object3D.add(ring);
+      this.detail = { el, canvas, tex, ring };
     }
     drawProjectDetail(this.detail.canvas, p);
     this.detail.tex.needsUpdate = true;
@@ -405,15 +483,52 @@ AFRAME.registerComponent("tool-bag", {
     const gaze = cam.getWorldDirection(new THREE.Vector3());
     const at = camPos.clone().addScaledVector(gaze, 2.4);
     const o = this.detail.el.object3D;
-    o.position.copy(at);
-    o.lookAt(camPos.x, at.y, camPos.z);
-    o.scale.setScalar(1);
+    const dummy = new THREE.Object3D();
+    dummy.position.copy(at);
+    dummy.lookAt(camPos.x, at.y, camPos.z);
+
+    // start from the clicked card (or the bag) and zoom up to your view
+    const source = (fromEl || this.bagEl).object3D;
+    source.updateMatrixWorld();
+    const fromPos = source.getWorldPosition(new THREE.Vector3());
+    const fromQuat = source.getWorldQuaternion(new THREE.Quaternion());
+    const fromScale = Math.max(0.15, source.getWorldScale(new THREE.Vector3()).x * 0.5);
+    this.detailAnim = { t0: this.el.sceneEl.time / 1000, fromPos, fromQuat, fromScale, toPos: at, toQuat: dummy.quaternion.clone() };
+    o.position.copy(fromPos);
+    o.quaternion.copy(fromQuat);
+    o.scale.setScalar(fromScale);
     o.visible = true;
     this.detailOpen = true;
+    for (let i = 0; i < 40; i++) this.emitSparkle(this.el.object3D.worldToLocal(fromPos.clone()), 0.6);
+  },
+
+  animateDetail(sec) {
+    const a = this.detailAnim;
+    if (!a || !this.detail) return;
+    const t = Math.min(1, (sec - a.t0) / 0.55);
+    const e = 1 - Math.pow(1 - t, 3);                  // ease out
+    const over = t < 1 ? 1 + Math.sin(t * Math.PI) * 0.06 : 1;   // slight overshoot as it lands
+    const o = this.detail.el.object3D;
+    o.position.lerpVectors(a.fromPos, a.toPos, e);
+    o.quaternion.slerpQuaternions(a.fromQuat, a.toQuat, e);
+    o.scale.setScalar((a.fromScale + (1 - a.fromScale) * e) * over);
+
+    // glow ring that bursts behind the card as it arrives
+    const ring = this.detail.ring;
+    const rt = Math.min(1, Math.max(0, (sec - a.t0 - 0.25) / 0.7));
+    ring.visible = rt > 0 && rt < 1;
+    ring.position.copy(a.toPos);
+    ring.quaternion.copy(a.toQuat);
+    ring.translateZ(-0.05);
+    ring.scale.setScalar(0.6 + rt * 1.6);
+    ring.material.opacity = 0.7 * (1 - rt);
+    if (t >= 1 && rt >= 1) this.detailAnim = null;
   },
 
   hideDetail() {
     if (!this.detailOpen) return false;
+    this.detailAnim = null;
+    this.detail.ring.visible = false;
     this.detail.el.object3D.visible = false;
     this.detail.el.object3D.scale.setScalar(HIDDEN);
     this.detailOpen = false;

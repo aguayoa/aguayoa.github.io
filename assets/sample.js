@@ -1,0 +1,49 @@
+// Sample content shown to visitors who haven't signed in (their edits stay in their own browser).
+// Signed-in users' real data lives in Supabase.
+
+window.STATUS_LABELS = {
+  active: "Active",
+  planning: "Planning",
+  talks: "In talks",
+  paused: "Paused",
+  done: "Done",
+};
+
+window.SAMPLE_PROJECTS = [
+  {
+    name: "Sample: Launch a side project",
+    tagline: "Try editing me: change the name, check off a step, add your own.",
+    category: "Sample",
+    status: "planning",
+    icon: "🚀",
+    link: "",
+    overview:
+      "This is a sample project so you can see how Aware Life works. Click any field to edit it. Sign in with your email to create your own projects and keep them private and synced.",
+    focus: ["Pick the idea", "Set a first milestone", "Tell one person about it"],
+    tasks: [
+      { text: "Write the idea in one sentence", done: true },
+      { text: "List three first steps", done: false },
+      { text: "Do the first step", done: false },
+    ],
+  },
+];
+
+// Sample reminders and to-dos, dated relative to today
+window.SAMPLE_REMINDERS = (() => {
+  const day = (n) => {
+    const d = new Date();
+    d.setDate(d.getDate() + n);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  };
+  return [
+    { title: "Welcome to Aware Life 👋", due_date: day(0), due_time: "09:00", color: "#0a84ff", done: false },
+    { title: "Try adding your own reminder", due_date: day(2), due_time: null, color: "#34c759", done: false },
+    { title: "Review the week", due_date: day(5), due_time: "17:30", color: "#ff9f0a", done: false },
+  ];
+})();
+
+window.SAMPLE_TODOS = [
+  { text: "Open the tool bag in the Time Chamber", done: false },
+  { text: "Write a summary for today", done: false },
+  { text: "Sign in to save your own", done: false },
+];

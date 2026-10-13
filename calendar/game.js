@@ -1,6 +1,6 @@
-// Movement, camera views, calendar size/position, day summaries, and the on-screen menu.
+// Movement, camera views, calendar size/position, your data (reminders, to-dos, day summaries), and the menus.
 
-const VIEWS = ["first", "third", "overview"];
+const VIEWS = ["home", "first", "third", "overview"];
 const WALL_DEFAULT = { scale: 1, dist: 22.4, x: 0, y: 0 };
 const WALL_LIMITS = { scale: [0.4, 2.5], dist: [8, 70], x: [-40, 40], y: [-4, 20] };
 const START = { x: 0, z: -10 };
@@ -34,17 +34,11 @@ const state = {
   fly: 0,                                       // VR right stick up/down
   grab: null,
 };
-state.layout = saved.layout === "list" ? "list" : "year";
+state.layout = ["year", "list", "reminders", "todo"].includes(saved.layout) ? saved.layout : "year";
 const persist = () => store.save({ view: state.view, wall: state.wall, powered: state.powered, layout: state.layout });
 
-// Day summaries, saved in this browser: { "YYYY-MM-DD": "text" }
-const NOTES_KEY = "time-chamber-days";
-window.dayNotes = (() => {
-  try { return JSON.parse(localStorage.getItem(NOTES_KEY) || "{}"); } catch { return {}; }
-})();
-function saveNotes() {
-  try { localStorage.setItem(NOTES_KEY, JSON.stringify(window.dayNotes)); return true; } catch { return false; }
-}
+// Your data, loaded from the Store (Supabase when signed in, a browser sandbox otherwise)
+window.roomData = { reminders: [], todos: [], notes: {} };
 const clamp = (v, [lo, hi]) => Math.min(hi, Math.max(lo, v));
 
 // Real head pose: the THREE camera is driven by WebXR in VR and by this script on desktop
@@ -95,13 +89,27 @@ AFRAME.registerComponent("time-chamber", {
     els.wall.addEventListener("wall-reset", () => { state.wall = { ...WALL_DEFAULT }; applyWall(); persist(); });
     els.wall.addEventListener("layout-changed", (e) => { state.layout = e.detail.layout; persist(); });
     els.wall.addEventListener("day-selected", (e) => openDay(e.detail.key));
+    els.wall.addEventListener("reminder-bubble", (e) => showReminderBubble(e.detail.key, e.detail.point));
+    els.wall.addEventListener("board-action", (e) => boardAction(e.detail.action, e.detail.id));
+    els.bag = document.getElementById("toolbag").components["tool-bag"];
+    ensureBubble();   // create it now so it's loaded before the first click
     setView(state.view);
     setPowered(state.powered);
+
+    // Account + data
+    Store.init().then((s) => {
+      Account.mount(document.getElementById("account"));
+      showMode(s);
+      loadData();
+      Store.onChange((st) => { showMode(st); loadData(); });
+    });
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) loadData(); });
 
     // Desktop: drag to look, wheel to zoom, keys to move
     const canvas = scene.canvas;
     canvas.addEventListener("pointerdown", (e) => {
       pointer.downAt = [e.clientX, e.clientY];
+      pointer.last = [e.clientX, e.clientY];
       pointer.dragged = false;
       if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
     });
@@ -124,12 +132,13 @@ AFRAME.registerComponent("time-chamber", {
 
     window.addEventListener("keydown", (e) => {
       if (e.code === "Escape") {
-        const bag = document.getElementById("toolbag").components["tool-bag"];
-        if (!closeDay() && !(bag && bag.hideDetail())) els.wallC.clearFront();
+        if (!sheet.el.hidden) return;                 // the sheet handles its own Escape
+        if (!hideBubble() && !els.bag.hideDetail()) els.wallC.clearFront();
         return;
       }
       if (e.target.closest && e.target.closest("input, button, select, textarea")) return;
       state.keys.add(e.code);
+      if (e.code === "KeyH") setView("home");
       if (e.code === "Digit1") setView("first");
       if (e.code === "Digit2") setView("third");
       if (e.code === "Digit3") setView("overview");
@@ -205,7 +214,7 @@ AFRAME.registerComponent("time-chamber", {
     const avatar = els.player.components["fighter-avatar"];
     els.player.object3D.position.copy(p);
     els.player.object3D.rotation.y = state.facing;
-    els.player.object3D.visible = state.view !== "first";
+    els.player.object3D.visible = state.view !== "first" && state.view !== "home";
     if (avatar) avatar.animate(dt, speed, p.y > ground + 0.05, ground, t);
 
     // VR grab-and-drag the calendar (movement is amplified so the giant wall is easy to place)
@@ -224,14 +233,14 @@ AFRAME.registerComponent("time-chamber", {
       cam.position.set(0, 0, 0);
       cam.rotation.set(0, 0, 0);
       rig.rotation.set(0, state.vrYaw, 0);
-      const offset = { first: [0, 0, 0], third: [0, 1.0, 4.2], overview: [0, 24, 30] }[state.view];
+      const offset = { home: [0, 0, 0], first: [0, 0, 0], third: [0, 1.0, 4.2], overview: [0, 24, 30] }[state.view];
       const o = new THREE.Vector3(...offset).applyAxisAngle(new THREE.Vector3(0, 1, 0), state.vrYaw);
       rig.position.copy(p).add(o);
     } else {
       rig.rotation.set(0, 0, 0);
       const { yaw: ly, pitch } = state.look;
       const eye = new THREE.Vector3();
-      if (state.view === "first") {
+      if (state.view === "first" || state.view === "home") {
         eye.copy(p).add(new THREE.Vector3(0, 1.6, 0));
       } else {
         const target = p.clone().add(new THREE.Vector3(0, 1.4, 0));
@@ -243,13 +252,20 @@ AFRAME.registerComponent("time-chamber", {
       cam.position.set(0, 0, 0);
       cam.rotation.set(pitch, ly, 0);
     }
+
+    animateBubble(t / 1000);
   },
 });
 
 // ── Actions ───────────────────────────────────────────────
 function setView(view) {
+  const was = state.view;
   state.view = view;
   if (els.wallC) els.wallC.clearFront();
+  if (els.bag) {
+    if (view === "home") goHome();
+    else if (was === "home") els.bag.setHome(false);
+  }
   if (view === "first") state.look.pitch = Math.min(state.look.pitch, 0.4);
   if (view === "third") state.look.pitch = -0.22;
   if (view === "overview") state.look.pitch = -0.75;
@@ -257,6 +273,19 @@ function setView(view) {
   persist();
 }
 function cycleView() { setView(VIEWS[(VIEWS.indexOf(state.view) + 1) % VIEWS.length]); }
+
+// Home view: stand in front of the tool bag; it opens and your projects fly up toward you
+function goHome() {
+  const bagObj = els.bag.el.object3D;
+  const B = bagObj.position, yaw = bagObj.rotation.y;
+  const front = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
+  const P = B.clone().addScaledVector(front, 5.4);
+  state.player.set(P.x, groundAt(P.x, P.z), P.z);
+  const d = B.clone().sub(P);
+  state.look.yaw = state.vrYaw = state.facing = Math.atan2(-d.x, -d.z);
+  state.look.pitch = 0.14;
+  els.bag.setHome(true);
+}
 
 function setPowered(on) {
   state.powered = on;
@@ -307,103 +336,303 @@ document.getElementById("respawn").addEventListener("click", () => {
   setView(state.view);
 });
 
-// ── Day summaries ─────────────────────────────────────────
-const dayEl = {
-  panel: document.getElementById("day"),
-  title: document.getElementById("day-title"),
-  events: document.getElementById("day-events"),
-  text: document.getElementById("day-text"),
-  status: document.getElementById("day-status"),
-};
-let openKey = null, saveTimer = null;
+// ── Data ──────────────────────────────────────────────────
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
-function openDay(key) {
-  const events = eventsByDate()[key] || [];
-  if (els.scene.is("vr-mode")) return showDayCard(key, events);
-  openKey = key;
-  dayEl.title.textContent = formatDay(key);
-  dayEl.events.innerHTML = events.map((e) =>
-    `<li><span style="background:${e.color || "#2b59c3"}"></span>${e.title.replace(/</g, "&lt;")}</li>`).join("");
-  dayEl.events.hidden = !events.length;
-  dayEl.text.value = window.dayNotes[key] || "";
-  dayEl.status.textContent = window.dayNotes[key] ? "Saved in this browser" : "";
-  dayEl.panel.hidden = false;
-  dayEl.text.focus();
-}
-
-function storeDay() {
-  if (!openKey) return;
-  const text = dayEl.text.value.trim();
-  if (text) window.dayNotes[openKey] = text;
-  else delete window.dayNotes[openKey];
-  dayEl.status.textContent = saveNotes() ? (text ? "Saved in this browser" : "Summary cleared") : "Couldn't save (browser storage is blocked)";
+async function loadData() {
+  try {
+    const [projects, reminders, todos, notes] = await Promise.all([
+      Store.projects.list(), Store.reminders.list(), Store.todos.list(), Store.notes.all(),
+    ]);
+    Object.assign(window.roomData, { reminders, todos, notes });
+    els.bag.setProjects(projects);
+  } catch (e) {
+    console.error(e);
+    showBubble("Couldn't load your data", [{ title: e.message, note: true }]);
+  }
   els.wallC.render();
 }
 
-function closeDay() {
-  if (dayEl.panel.hidden) return false;
-  clearTimeout(saveTimer);
-  storeDay();
-  dayEl.panel.hidden = true;
-  openKey = null;
-  els.wallC.selectedDay = null;
-  els.wallC.render();
+async function run(task) {
+  try { await task(); } catch (e) { showBubble("Something went wrong", [{ title: e.message, note: true }]); }
+}
+const reloadReminders = async () => { roomData.reminders = await Store.reminders.list(); els.wallC.render(); };
+const reloadTodos = async () => { roomData.todos = await Store.todos.list(); els.wallC.render(); };
+
+function showMode(s) {
+  document.getElementById("mode-note").textContent = s.signedIn
+    ? "Saved to your account, private to you."
+    : "Sandbox: changes stay in this browser. Sign in to save to your account.";
+}
+
+// Clicks on the Reminders / To-do boards
+function boardAction(action, id) {
+  const vr = els.scene.is("vr-mode");
+  const needsKeyboard = () => showBubble("Add from your phone or computer", [{ title: "There's no keyboard in VR. Add it from the menu outside VR and it shows up here.", note: true }]);
+  if (action === "reminder-toggle") run(async () => { const r = roomData.reminders.find((x) => x.id === id); await Store.reminders.update(id, { done: !r.done }); await reloadReminders(); });
+  if (action === "reminder-delete") run(async () => { await Store.reminders.remove(id); await reloadReminders(); });
+  if (action === "todo-toggle") run(async () => { const t = roomData.todos.find((x) => x.id === id); await Store.todos.update(id, { done: !t.done }); await reloadTodos(); });
+  if (action === "todo-delete") run(async () => { await Store.todos.remove(id); await reloadTodos(); });
+  if (action === "reminder-new") vr ? needsKeyboard() : openReminderSheet(todayKey());
+  if (action === "todo-new") vr ? needsKeyboard() : openTodoSheet();
+}
+
+// ── Pop-out sheet ─────────────────────────────────────────
+// One full-size window used for the day summary, new reminders and new to-dos.
+// It grows out of the spot you clicked.
+const sheet = { el: document.getElementById("sheet"), card: document.getElementById("sheet-card"), body: document.getElementById("sheet-body"), onClose: null };
+const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+function openSheet(html, onClose) {
+  sheet.body.innerHTML = html;
+  sheet.onClose = onClose;
+  sheet.el.hidden = false;
+  state.keys.clear();
+  if (reduceMotion) return;
+  const r = sheet.card.getBoundingClientRect();
+  const [px, py] = pointer.last || [innerWidth / 2, innerHeight / 2];
+  sheet.card.animate([
+    { transform: `translate(${px - (r.left + r.width / 2)}px, ${py - (r.top + r.height / 2)}px) scale(0.06)`, opacity: 0, borderRadius: "60px" },
+    { opacity: 1, offset: 0.35 },
+    { transform: "none", opacity: 1, borderRadius: "26px" },
+  ], { duration: 460, easing: "cubic-bezier(.2,.9,.25,1.08)" });
+  document.getElementById("sheet-backdrop").animate([{ opacity: 0 }, { opacity: 1 }], { duration: 300 });
+}
+
+async function closeSheet(save = true) {
+  if (sheet.el.hidden) return false;
+  const fn = sheet.onClose;
+  sheet.onClose = null;
+  if (fn) await fn(save);
+  if (!reduceMotion) {
+    await Promise.all([
+      sheet.card.animate([{ transform: "none", opacity: 1 }, { transform: "scale(.92)", opacity: 0 }], { duration: 180, easing: "ease-in" }).finished,
+      document.getElementById("sheet-backdrop").animate([{ opacity: 1 }, { opacity: 0 }], { duration: 180 }).finished,
+    ]);
+  }
+  sheet.el.hidden = true;
   return true;
 }
+document.getElementById("sheet-backdrop").addEventListener("click", () => closeSheet(true));
+sheet.el.addEventListener("keydown", (e) => { if (e.key === "Escape") { e.preventDefault(); closeSheet(true); } });
+sheet.el.addEventListener("click", (e) => { if (e.target.closest("[data-close]")) closeSheet(true); });
 
-dayEl.text.addEventListener("input", () => {
-  dayEl.status.textContent = "Saving…";
-  clearTimeout(saveTimer);
-  saveTimer = setTimeout(storeDay, 500);
-});
-document.getElementById("day-close").addEventListener("click", closeDay);
-document.getElementById("day-delete").addEventListener("click", () => {
-  dayEl.text.value = "";
-  storeDay();
-});
+const swatches = (selected) => REMINDER_COLORS.map((c) =>
+  `<label class="swatch" style="--c:${c}"><input type="radio" name="color" value="${c}" ${c === selected ? "checked" : ""}><span></span></label>`).join("");
 
-// In VR there's no keyboard, so show the summary on a card floating in front of you
-let dayCard = null;
-function showDayCard(key, events) {
-  if (!dayCard) {
-    const canvas = makeCanvas(1024, 768), tex = canvasTexture(canvas);
-    const el = document.createElement("a-entity");
-    el.classList.add("clickable");
-    el.addEventListener("loaded", () => el.setObject3D("mesh", new THREE.Mesh(new THREE.PlaneGeometry(2.4, 1.8), basic({ map: tex }))), { once: true });
-    el.addEventListener("click", () => { el.object3D.visible = false; el.object3D.scale.setScalar(HIDDEN); });
-    els.scene.appendChild(el);
-    dayCard = { el, canvas, tex };
+function bubblesHTML(list) {
+  if (!list.length) return `<p class="imsg-empty">No reminders for this day.</p>`;
+  return list.map((r) => `
+    <div class="imsg-row ${r.done ? "done" : ""}">
+      <button type="button" class="imsg-bubble" style="--c:${esc(r.color)}" data-toggle-rem="${esc(r.id)}" title="Mark ${r.done ? "not done" : "done"}">${esc(r.title)}</button>
+      <div class="imsg-meta">${esc(timeLabel(r.due_time))}${r.done ? " · Done" : ""} · <button type="button" class="link" data-del-rem="${esc(r.id)}">Delete</button></div>
+    </div>`).join("");
+}
+
+// ── Day summary ───────────────────────────────────────────
+function openDay(key) {
+  const events = eventsByDate()[key] || [];
+  const dayReminders = () => roomData.reminders.filter((r) => r.due_date === key);
+  if (els.scene.is("vr-mode")) {
+    const items = [...events.map((e) => ({ title: e.title, note: true })), ...dayReminders()];
+    if (roomData.notes[key]) items.unshift({ title: roomData.notes[key], note: true });
+    return showBubble(formatDay(key), items.length ? items : [{ title: "No summary yet. Write one outside VR.", note: true }]);
   }
-  drawDayCard(dayCard.canvas, key, events, window.dayNotes[key]);
-  dayCard.tex.needsUpdate = true;
-  const { pos, fwd } = headPose();
-  const right = new THREE.Vector3(-fwd.z, 0, fwd.x);
-  const at = pos.clone().addScaledVector(fwd, 2.6).addScaledVector(right, 1.1).add(new THREE.Vector3(0, -0.3, 0));
-  const o = dayCard.el.object3D;
+
+  openSheet(`
+    <header class="sh-head">
+      <div><p class="sh-kicker">Day summary</p><h2>${esc(formatDay(key))}</h2></div>
+      <button type="button" class="sh-x" data-close aria-label="Close">✕</button>
+    </header>
+    <div class="sh-grid">
+      <section class="sh-main">
+        ${events.length ? `<ul class="sh-events">${events.map((e) => `<li><span style="background:${esc(e.color || "#2b59c3")}"></span>${esc(e.title)}</li>`).join("")}</ul>` : ""}
+        <textarea id="day-text" placeholder="How did today go? Wins, notes, what's next…">${esc(roomData.notes[key] || "")}</textarea>
+        <p class="sh-hint"><kbd>Enter</kbd> saves · <kbd>Shift</kbd> + <kbd>Enter</kbd> new line · <kbd>Esc</kbd> closes</p>
+      </section>
+      <aside class="sh-side">
+        <h3>Reminders</h3>
+        <div class="imsg" id="day-rems">${bubblesHTML(dayReminders())}</div>
+        <form class="rem-form" id="day-rem-form" autocomplete="off">
+          <input id="rem-title" placeholder="New reminder for this day…" required>
+          <div class="rem-row">
+            <input type="time" id="rem-time" aria-label="Time (optional)">
+            <div class="swatches">${swatches(REMINDER_COLORS[0])}</div>
+          </div>
+          <button type="submit" class="send">Add</button>
+        </form>
+      </aside>
+    </div>`, async (save) => {
+    if (save) {
+      const text = document.getElementById("day-text").value;
+      await run(async () => {
+        await Store.notes.set(key, text);
+        if (text.trim()) roomData.notes[key] = text.trim(); else delete roomData.notes[key];
+      });
+    }
+    els.wallC.selectedDay = null;
+    els.wallC.render();
+  });
+
+  const text = document.getElementById("day-text");
+  text.focus();
+  text.setSelectionRange(text.value.length, text.value.length);
+  text.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); closeSheet(true); }
+  });
+
+  const refreshBubbles = () => { document.getElementById("day-rems").innerHTML = bubblesHTML(dayReminders()); };
+  document.getElementById("day-rem-form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const title = document.getElementById("rem-title").value.trim();
+    if (!title) return;
+    run(async () => {
+      await Store.reminders.create({
+        title, due_date: key,
+        due_time: document.getElementById("rem-time").value || null,
+        color: (sheet.body.querySelector("input[name=color]:checked") || {}).value || REMINDER_COLORS[0],
+        done: false,
+      });
+      document.getElementById("rem-title").value = "";
+      await reloadReminders();
+      refreshBubbles();
+    });
+  });
+  document.getElementById("day-rems").addEventListener("click", (e) => {
+    const t = e.target.closest("[data-toggle-rem]"), d = e.target.closest("[data-del-rem]");
+    if (t) run(async () => { const r = roomData.reminders.find((x) => x.id === t.dataset.toggleRem); await Store.reminders.update(r.id, { done: !r.done }); await reloadReminders(); refreshBubbles(); });
+    if (d) run(async () => { await Store.reminders.remove(d.dataset.delRem); await reloadReminders(); refreshBubbles(); });
+  });
+}
+
+// ── New reminder ──────────────────────────────────────────
+function openReminderSheet(day) {
+  openSheet(`
+    <header class="sh-head">
+      <div><p class="sh-kicker">Reminders</p><h2>New reminder</h2></div>
+      <button type="button" class="sh-x" data-close aria-label="Close">✕</button>
+    </header>
+    <form class="rem-form big" id="new-rem" autocomplete="off">
+      <input id="nr-title" placeholder="Remind me to…" required>
+      <div class="rem-row">
+        <input type="date" id="nr-date" value="${day}" required aria-label="Date">
+        <input type="time" id="nr-time" aria-label="Time (optional)">
+        <div class="swatches">${swatches(REMINDER_COLORS[0])}</div>
+      </div>
+      <div class="sh-actions">
+        <button type="button" class="ghost" data-close>Cancel</button>
+        <button type="submit" class="send">Add reminder</button>
+      </div>
+      <p class="sh-hint"><kbd>Enter</kbd> adds it · it shows as a dot on that day in the calendar</p>
+    </form>`, null);
+  document.getElementById("nr-title").focus();
+  document.getElementById("new-rem").addEventListener("submit", (e) => {
+    e.preventDefault();
+    run(async () => {
+      await Store.reminders.create({
+        title: document.getElementById("nr-title").value.trim(),
+        due_date: document.getElementById("nr-date").value,
+        due_time: document.getElementById("nr-time").value || null,
+        color: (sheet.body.querySelector("input[name=color]:checked") || {}).value || REMINDER_COLORS[0],
+        done: false,
+      });
+      await reloadReminders();
+      closeSheet(false);
+    });
+  });
+}
+
+// ── New to-dos ────────────────────────────────────────────
+function openTodoSheet() {
+  let added = 0;
+  openSheet(`
+    <header class="sh-head">
+      <div><p class="sh-kicker">To-do</p><h2>Add to-dos</h2></div>
+      <button type="button" class="sh-x" data-close aria-label="Close">✕</button>
+    </header>
+    <form class="rem-form big" id="new-todo" autocomplete="off">
+      <input id="nt-text" placeholder="What needs doing?" required>
+      <div class="sh-actions">
+        <span class="sh-hint" id="nt-count"><kbd>Enter</kbd> adds it and keeps this open for the next one</span>
+        <button type="button" class="send" data-close>Done</button>
+      </div>
+    </form>`, null);
+  const input = document.getElementById("nt-text");
+  input.focus();
+  document.getElementById("new-todo").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = "";
+    run(async () => {
+      await Store.todos.create({ text, done: false, position: roomData.todos.length });
+      await reloadTodos();
+      added++;
+      document.getElementById("nt-count").textContent = `Added ${added} · Enter adds another`;
+    });
+  });
+}
+
+// ── Floating iMessage bubble (in the room, works in VR) ──
+let bubble = null;
+function ensureBubble() {
+  if (bubble) return bubble;
+  const canvas = makeCanvas(1024, 512), tex = canvasTexture(canvas);
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 0.5), basic({ map: tex, transparent: true }));
+  const el = document.createElement("a-entity");
+  el.classList.add("clickable");
+  el.addEventListener("loaded", () => { el.setObject3D("mesh", mesh); el.object3D.visible = false; el.object3D.scale.setScalar(HIDDEN); }, { once: true });
+  el.addEventListener("click", () => { if (!pointer.dragged) hideBubble(); });
+  els.scene.appendChild(el);
+  bubble = { el, mesh, canvas, tex, anim: null };
+  return bubble;
+}
+
+function showReminderBubble(key, point) {
+  const list = roomData.reminders.filter((r) => r.due_date === key);
+  showBubble(`Reminders · ${dayLabel(key)}`, list, point);
+}
+
+function showBubble(title, items, point) {
+  const b = ensureBubble();
+  const aspect = drawReminderPopup(b.canvas, title, items);
+  b.tex.dispose();
+  b.tex = canvasTexture(b.canvas);
+  b.mesh.material.map = b.tex;
+  b.mesh.material.needsUpdate = true;
+  b.mesh.geometry.dispose();
+  b.mesh.geometry = new THREE.PlaneGeometry(1, aspect);
+
+  const cam = els.cam.getObject3D("camera");
+  const camPos = cam.getWorldPosition(new THREE.Vector3());
+  let at;
+  if (point) {
+    at = point.clone().add(camPos.clone().sub(point).normalize().multiplyScalar(0.8));
+  } else {
+    at = camPos.clone().addScaledVector(cam.getWorldDirection(new THREE.Vector3()), 2.4);
+  }
+  const dist = at.distanceTo(camPos);
+  const o = b.el.object3D;
   o.position.copy(at);
-  o.lookAt(pos.x, at.y, pos.z);
-  o.scale.setScalar(1);
+  o.lookAt(camPos);
+  b.anim = { t0: els.scene.time / 1000, size: Math.max(0.8, dist * 0.6) };
   o.visible = true;
 }
 
-// Move summaries between browsers / devices
-document.getElementById("notes-export").addEventListener("click", () => {
-  const blob = new Blob([JSON.stringify(window.dayNotes, null, 2)], { type: "application/json" });
-  const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(blob), download: "day-summaries.json" });
-  a.click();
-  URL.revokeObjectURL(a.href);
-});
-document.getElementById("notes-import").addEventListener("change", async (e) => {
-  const file = e.target.files[0];
-  if (!file) return;
-  try {
-    const data = JSON.parse(await file.text());
-    Object.entries(data).forEach(([k, v]) => { if (/^\d{4}-\d{2}-\d{2}$/.test(k) && typeof v === "string") window.dayNotes[k] = v; });
-    saveNotes();
-    els.wallC.render();
-    document.getElementById("notes-status").textContent = `Imported ${Object.keys(data).length} days`;
-  } catch {
-    document.getElementById("notes-status").textContent = "That file isn't a summaries export";
-  }
-  e.target.value = "";
-});
+function hideBubble() {
+  if (!bubble || !bubble.el.object3D.visible) return false;
+  bubble.anim = null;
+  bubble.el.object3D.visible = false;
+  bubble.el.object3D.scale.setScalar(HIDDEN);
+  return true;
+}
+
+// iMessage-style pop: grows from small with a little overshoot
+function animateBubble(sec) {
+  if (!bubble || !bubble.anim) return;
+  const t = Math.min(1, (sec - bubble.anim.t0) / 0.35);
+  const back = 1.70158;
+  const e = 1 + (back + 1) * Math.pow(t - 1, 3) + back * Math.pow(t - 1, 2);   // ease-out-back
+  bubble.el.object3D.scale.setScalar(Math.max(HIDDEN, bubble.anim.size * e));
+  if (t >= 1) bubble.anim = null;
+}

@@ -3,48 +3,81 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>aguayoa</title>
+  <title>Aware Life</title>
   <link rel="stylesheet" href="assets/style.css">
+  <link rel="stylesheet" href="assets/home.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 </head>
 <body>
+  <div class="topbar">
+    <a class="brand" href="./"><span class="mark" aria-hidden="true"></span><span id="brand-name">Aware Life</span></a>
+    <div id="account"></div>
+  </div>
+
   <main class="wrap">
+    <div class="banner" id="sandbox-banner" hidden>
+      <span>You're exploring a sample. Changes stay in this browser.</span>
+      <button type="button" class="acct-chip primary" id="banner-signin">Make it yours</button>
+    </div>
+
     <header class="site-header">
-      <!-- Change the name in OWNER below to personalize the greeting -->
       <p class="hello" id="hello"></p>
-      <h1>Home</h1>
+      <h1 id="tagline">Live aware.</h1>
       <p class="today" id="today"></p>
     </header>
 
-    <section class="home-grid" aria-label="Sections">
-      <a class="card home-tile" href="calendar/">
-        <div class="card-top">
-          <span class="card-icon" aria-hidden="true">🌀</span>
-          <span class="tag">VR ready</span>
-        </div>
+    <a class="card chamber" href="calendar/">
+      <div class="chamber-art" aria-hidden="true"><span></span><span></span><span></span></div>
+      <div>
+        <span class="tag">VR ready</span>
         <h2>The Time Chamber</h2>
-        <p>Step inside: a giant fiscal-year calendar on the wall, and your projects kept in a floating 1960s tool bag.</p>
-        <span class="tag" id="project-count" style="align-self:flex-start"></span>
+        <p>Your fiscal-year calendar, reminders, to-dos and the projects tool bag, in a room you can walk around.</p>
         <span class="card-cta">Enter the room →</span>
-      </a>
+      </div>
+    </a>
+
+    <section class="section" aria-labelledby="projects-title">
+      <div class="section-head">
+        <h2 id="projects-title">Projects</h2>
+        <div class="section-actions">
+          <label class="ghost-btn" id="import-label" hidden>Import<input type="file" id="import-file" accept=".json,application/json" hidden></label>
+          <button type="button" class="ghost-btn" id="export-btn" hidden>Export</button>
+          <button type="button" class="acct-chip primary" id="new-project">+ New project</button>
+        </div>
+      </div>
+      <div class="grid" id="grid" aria-live="polite"></div>
     </section>
 
-    <footer>aguayoa.github.io · <a href="projects/">Plain project list</a></footer>
+    <section class="section" id="admin" hidden aria-labelledby="admin-title">
+      <div class="section-head"><h2 id="admin-title">Visitors</h2><span class="muted" id="visitor-count"></span></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Email</th><th>Joined</th><th>Last visit</th><th>Visits</th></tr></thead>
+          <tbody id="visitors"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <footer>
+      <span id="footer-name">Aware Life</span> · Data is private to each account. Visitors' emails are used only to sign in and track visits.
+    </footer>
   </main>
 
-  <script src="assets/projects.js"></script>
-  <script>
-    const OWNER = "aguayoa";
+  <!-- Project zoom view -->
+  <div class="zoom" id="zoom" hidden>
+    <div class="zoom-backdrop" id="zoom-backdrop"></div>
+    <article class="zoom-panel" id="zoom-panel" role="dialog" aria-modal="true" aria-labelledby="z-name">
+      <div class="zoom-glow" aria-hidden="true"></div>
+      <div class="zoom-shine" aria-hidden="true"></div>
+      <button type="button" class="zoom-close" id="zoom-close" aria-label="Close">✕</button>
+      <div class="zoom-body" id="zoom-body"></div>
+    </article>
+  </div>
 
-    const h = new Date().getHours();
-    const part = h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening";
-    document.getElementById("hello").textContent = `${part}, ${OWNER}`;
-    document.getElementById("today").textContent = new Date().toLocaleDateString(undefined, {
-      weekday: "long", month: "long", day: "numeric", year: "numeric",
-    });
-
-    const active = PROJECTS.filter((p) => p.status === "active").length;
-    document.getElementById("project-count").textContent =
-      `${PROJECTS.length} projects · ${active} active`;
-  </script>
+  <script src="assets/config.js"></script>
+  <script src="assets/sample.js"></script>
+  <script src="assets/store.js"></script>
+  <script src="assets/account.js"></script>
+  <script src="assets/home.js"></script>
 </body>
 </html>

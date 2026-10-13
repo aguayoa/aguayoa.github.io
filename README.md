@@ -1,56 +1,37 @@
-# aguayoa.github.io
+# Aware Life
 
-My personal homepage: a Projects section with a page per project, and a walk-in VR Calendar.
+*Live aware.* A personal life space: projects, reminders, to-dos and day summaries, with a walk-in VR room (the Time Chamber).
 
-**Projects:** AI Data Analytics · Javlin Concepts · Aware · Fridge Cig
+Live at **https://aguayoa.github.io/**
+
+## How data is stored
+
+- **Signed in:** everything is saved in Supabase (Postgres) with row-level security. Each account can only read and write its own rows. See [`supabase/schema.sql`](supabase/schema.sql).
+- **Not signed in:** visitors get a sandbox with a sample project, reminders and to-dos. Their changes stay in their own browser.
+- Signing in is by emailed link (no password). Every sign-in creates or uses that person's own private space, and admins can see the visitor list on the homepage.
+
+## Setup (one time)
+
+1. Create a free project at [supabase.com](https://supabase.com).
+2. In **SQL Editor**, run `supabase/schema.sql`.
+3. In **Authentication → URL Configuration**, set Site URL to `https://aguayoa.github.io` and add `https://aguayoa.github.io/**` to Redirect URLs.
+4. Copy **Project URL** and the **anon public** key from **Project Settings → API** into `assets/config.js`.
+5. Sign in on the site once, then make yourself admin in SQL Editor:
+   `insert into admins (user_id) select id from auth.users where email = 'YOUR EMAIL';`
 
 ## Pages
 
-| Page | URL | File |
+| Page | URL | Files |
 |---|---|---|
-| Home | `/` | `index.html` |
-| The Time Chamber (VR room: calendar + projects tool bag) | `/calendar/` | `calendar/` |
-| Plain project list (for phones) | `/projects/` | `projects/index.html`, `projects/project.html` |
+| Homepage: projects (zoom in to edit), visitors (admin) | `/` | `index.html`, `assets/home.js`, `assets/home.css` |
+| The Time Chamber: calendar, reminders, to-do, projects tool bag | `/calendar/` | `calendar/` |
 
-## Files you edit
+Shared: `assets/config.js` (settings), `assets/store.js` (data layer), `assets/account.js` (sign-in), `assets/sample.js` (visitor sample content).
 
-| File | What it controls |
-|---|---|
-| `assets/projects.js` | Project info, tasks, status |
-| `assets/events.js` | Events shown on the Calendar wall |
-| `index.html` | Greeting name (`OWNER`) |
-| `calendar/draw.js` | Fiscal year settings (`FY_START_MONTH`, `FY_CHOICES`) |
+## The Time Chamber
 
-## Updating
-
-- **Check off a task:** in `assets/projects.js`, change `done: false` to `done: true`.
-- **Change status:** set `status` to `active`, `planning`, `talks`, `paused`, or `done`.
-- **Add a project:** copy one `{ ... }` block in `assets/projects.js` and give it a new `id`.
-- **Add a calendar event:** add `{ date: "2026-03-15", title: "Short title" }` to `assets/events.js`.
-
-## Projects tool bag
-
-Your projects float in the room inside a 1960s leather tool bag. Click the bag to open it and a card for each project rises out; click a card to see its overview, focus, and next steps. Cards are built from `assets/projects.js`, so editing that file updates the bag too.
-
-## Calendar
-
-- **Click the calendar** to show its controls: **Year** (12-month grid), **Month list** (months down the left, selected month large), **Bring to front**, **−** / **+**, **Reset**, and a blue corner handle you drag to resize.
-- **Click a month's name** to bring it to the front; click again to send it back.
-- **Click a day** to write a summary for it. Summaries save in that browser; use *Day summaries → Export / Import* in the menu to move them to another device.
-
-## Calendar in VR
-
-Open `https://aguayoa.github.io/calendar/` in your headset's browser (e.g. Meta Quest Browser) and press **VR**.
-Left stick walks, right stick turns, trigger picks a month to bring it close.
-
-## Publishing
-
-Live at **https://aguayoa.github.io/**. Push to `main` and GitHub Pages updates within a minute:
-
-```bash
-git add .
-git commit -m "Update site"
-git push
-```
-
-> GitHub Pages on a free account requires a **public** repo. Don't put anything private in these files.
+- **Click the calendar** for its toolbar: **Year**, **Month list**, **Reminders**, **To-do**, **Bring to front**, **−** / **+**, **Reset**, and a corner handle to drag-resize.
+- **Click a day** to open its summary full screen. **Enter** saves, **Shift + Enter** adds a new line. You can add reminders for that day there too.
+- **Reminder dots** show on days with reminders. Click the dots for an iMessage-style bubble.
+- **Home** view brings your projects flying out of the 1960s tool bag.
+- VR: open the page in your headset browser and press **VR**. Typing isn't possible in VR, so add things from a phone or computer and they sync.

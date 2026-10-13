@@ -83,7 +83,8 @@ AFRAME.registerComponent("cell-pillar", {
 
 // ── Calendar wall ─────────────────────────────────────────
 // The wall entity's origin is the bottom-center of the calendar, so scaling keeps it on the floor.
-// Layouts: "year" (4×3 grid) or "list" (month tabs down the left, selected month large on the right).
+// Layouts: "year" (4×3 grid), "list" (month tabs down the left, selected month large on the right),
+// "reminders" (an iMessage-style thread) or "todo" (a checklist). The last two replace the calendar.
 // Any month can also be brought to the front, floating in front of the viewer.
 // Clicking the calendar shows its controls: layout buttons, size buttons, and a drag-to-resize handle.
 
@@ -135,17 +136,27 @@ AFRAME.registerComponent("calendar-wall", {
       return { canvas, tex, item: this.track(el, this.tabPos(i), HIDDEN) };
     });
 
+    // Reminders / to-do board, shown in place of the calendar
+    this.boardCanvas = makeCanvas(2048, 1500);
+    this.boardTex = canvasTexture(this.boardCanvas);
+    this.boardHits = [];
+    const boardFace = new THREE.Mesh(new THREE.PlaneGeometry(28, 20.5), basic({ map: this.boardTex }));
+    const board = this.addClickable(boardFace, (e) => this.onBoardClick(boardFace, e));
+    this.board = this.track(board, new THREE.Vector3(0, 12.1, 0.06), HIDDEN);
+
     // Toolbar (above the calendar) — hidden until the calendar is clicked
     const buttons = [
-      { id: "year", label: "Year", w: 3.0 },
-      { id: "list", label: "Month list", w: 4.4 },
-      { id: "front", label: "Bring to front", w: 5.4 },
-      { id: "smaller", label: "−", w: 1.5 },
-      { id: "bigger", label: "+", w: 1.5 },
-      { id: "reset", label: "Reset", w: 2.6 },
-      { id: "close", label: "✕", w: 1.5 },
+      { id: "year", label: "Year", w: 2.6 },
+      { id: "list", label: "Month list", w: 4.0 },
+      { id: "reminders", label: "Reminders", w: 3.8 },
+      { id: "todo", label: "To-do", w: 2.8 },
+      { id: "front", label: "Bring to front", w: 4.8 },
+      { id: "smaller", label: "−", w: 1.4 },
+      { id: "bigger", label: "+", w: 1.4 },
+      { id: "reset", label: "Reset", w: 2.3 },
+      { id: "close", label: "✕", w: 1.4 },
     ];
-    const gap = 0.3, total = buttons.reduce((s, b) => s + b.w, 0) + gap * (buttons.length - 1);
+    const gap = 0.25, total = buttons.reduce((s, b) => s + b.w, 0) + gap * (buttons.length - 1);
     let x = -total / 2;
     this.buttons = buttons.map((b) => {
       const canvas = makeCanvas(Math.round(b.w * 160), 208), tex = canvasTexture(canvas);
@@ -220,8 +231,13 @@ AFRAME.registerComponent("calendar-wall", {
   // ── Layout ──────────────────────────────────────────────
   applyLayout() {
     const list = this.layout === "list";
+    const boardView = this.layout === "reminders" || this.layout === "todo";
+    this.setTarget(this.board, this.board.target.pos, boardView ? 1 : HIDDEN);
+    if (boardView) this.renderBoard();
     this.months.forEach((m, i) => {
-      if (this.front === i && this.frontPose) {
+      if (boardView) {
+        this.setTarget(m.item, this.gridPos(i), HIDDEN);
+      } else if (this.front === i && this.frontPose) {
         this.setTarget(m.item, this.frontPose.pos, this.frontPose.scale, this.frontPose.quat);
       } else if (list) {
         this.setTarget(m.item, this.bigPos, i === this.selected ? this.bigScale : HIDDEN);
@@ -229,7 +245,7 @@ AFRAME.registerComponent("calendar-wall", {
         this.setTarget(m.item, this.gridPos(i), 1);
       }
     });
-    this.tabs.forEach((tab, i) => this.setTarget(tab.item, this.tabPos(i), list ? 1 : HIDDEN));
+    this.tabs.forEach((tab, i) => this.setTarget(tab.item, this.tabPos(i), list && !boardView ? 1 : HIDDEN));
     const shown = this.controlsShown ? 1 : HIDDEN;
     this.buttons.forEach((b) => this.setTarget(b.item, b.item.target.pos, shown));
     this.setTarget(this.handle, this.handle.target.pos, shown);
@@ -294,7 +310,7 @@ AFRAME.registerComponent("calendar-wall", {
   },
 
   onButton(id) {
-    if (id === "year" || id === "list") this.setLayout(id);
+    if (["year", "list", "reminders", "todo"].includes(id)) this.setLayout(id);
     if (id === "front") this.toggleFront(this.selected);
     if (id === "smaller") this.el.emit("wall-resize", { factor: 1 / 1.15 });
     if (id === "bigger") this.el.emit("wall-resize", { factor: 1.15 });
@@ -303,18 +319,42 @@ AFRAME.registerComponent("calendar-wall", {
   },
 
   // Header → bring the month to the front (or send it back). Day → select it and open its summary.
+  // Reminder dot → iMessage bubble.
   onMonthClick(i, face, e) {
     this.showControls(true);
     const hit = e.detail.intersection;
     if (!hit || hit.object !== face || !hit.uv) return;
     const cx = hit.uv.x * 1024, cy = (1 - hit.uv.y) * 896;
     if (cy < HEADER_BOTTOM) return this.toggleFront(i);
-    const key = dayAt(fiscalMonths(this.fy)[i], cx, cy);
-    if (!key) return;
+    const cell = cellAt(fiscalMonths(this.fy)[i], cx, cy);
+    if (!cell) return;
+    const key = cell.key;
+    const dayReminders = (window.roomData.reminders || []).filter((r) => r.due_date === key);
+    if (cell.inDots && dayReminders.length) {
+      this.el.emit("reminder-bubble", { key, point: hit.point.clone() });
+      return;
+    }
     this.selected = i;
     this.selectedDay = key;
     this.render();
     this.el.emit("day-selected", { key });
+  },
+
+  onBoardClick(face, e) {
+    this.showControls(true);
+    const hit = e.detail.intersection;
+    if (!hit || hit.object !== face || !hit.uv) return;
+    const cx = hit.uv.x * this.boardCanvas.width, cy = (1 - hit.uv.y) * this.boardCanvas.height;
+    const target = this.boardHits.find((h) => cx >= h.x && cx <= h.x + h.w && cy >= h.y && cy <= h.y + h.h);
+    if (target) this.el.emit("board-action", { action: target.action, id: target.id });
+  },
+
+  renderBoard() {
+    const data = window.roomData || {};
+    this.boardHits = [];
+    if (this.layout === "reminders") drawReminderBoard(this.boardCanvas, data.reminders || [], this.boardHits);
+    if (this.layout === "todo") drawTodoBoard(this.boardCanvas, data.todos || [], this.boardHits);
+    this.boardTex.needsUpdate = true;
   },
 
   // ── Resize handle ───────────────────────────────────────
@@ -347,8 +387,12 @@ AFRAME.registerComponent("calendar-wall", {
   },
 
   render() {
-    const months = fiscalMonths(this.fy), events = eventsByDate(), notes = window.dayNotes || {};
-    this.months.forEach((m, i) => { drawMonth(m.canvas, months[i], events, notes, this.selectedDay); m.tex.needsUpdate = true; });
+    const data = window.roomData || {};
+    const months = fiscalMonths(this.fy), events = eventsByDate(), notes = data.notes || {};
+    const reminders = {};
+    (data.reminders || []).forEach((r) => (reminders[r.due_date] ||= []).push(r));
+    this.months.forEach((m, i) => { drawMonth(m.canvas, months[i], events, notes, this.selectedDay, reminders); m.tex.needsUpdate = true; });
+    if (this.layout === "reminders" || this.layout === "todo") this.renderBoard();
     drawTitle(this.titleCanvas, this.fy);
     this.titleTex.needsUpdate = true;
     this.renderControls();
@@ -358,7 +402,7 @@ AFRAME.registerComponent("calendar-wall", {
     const months = fiscalMonths(this.fy);
     this.tabs.forEach((tab, i) => { drawTab(tab.canvas, months[i], i === this.selected); tab.tex.needsUpdate = true; });
     this.buttons.forEach((b) => {
-      const active = b.id === this.layout || (b.id === "front" && this.front !== null);
+      const active = b.id === this.layout || (b.id === "front" && this.front !== null && this.layout !== "reminders" && this.layout !== "todo");
       drawButton(b.canvas, b.label, active);
       b.tex.needsUpdate = true;
     });

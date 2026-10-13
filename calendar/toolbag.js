@@ -1,7 +1,8 @@
 // A floating 1960s leather tool bag that holds the projects.
 // Click it to open: the frame jaws spread and a card for each project rises out.
 // Click a card to bring that project's details up in front of you.
-// Home view: the cards fly out larger, in an arc in front of you, trailing sparkles.
+// Opening sends every project card flying to wherever you're looking, names facing you.
+// While closed, the bag shakes now and then as gold fairies spark out of the seam.
 
 const STATUS_COLORS = { active: "#1f8a4c", planning: "#b7791f", talks: "#6b46c1", paused: "#718096", done: "#2b59c3" };
 const EMOJI_FONT = "'Segoe UI Emoji', 'Apple Color Emoji', 'Noto Color Emoji', sans-serif";
@@ -162,6 +163,67 @@ function leatherTexture() {
   return tex;
 }
 
+// Leather patch with stitching and debossed lettering (pressed into the leather, lit from above)
+function engravedPatch(text) {
+  const W = 1024, H = 272, c = makeCanvas(W, H), ctx = c.getContext("2d");
+  ctx.fillStyle = "#5e361b";
+  ctx.beginPath(); ctx.roundRect(0, 0, W, H, 40); ctx.fill();
+  for (let i = 0; i < 6000; i++) {
+    ctx.fillStyle = Math.random() < 0.5 ? `rgba(30,15,5,${Math.random() * 0.2})` : `rgba(150,100,60,${Math.random() * 0.12})`;
+    ctx.fillRect(Math.random() * W, Math.random() * H, 2 + Math.random() * 3, 2 + Math.random() * 3);
+  }
+  // raised edge + stitching
+  ctx.strokeStyle = "rgba(25,12,4,0.55)";
+  ctx.lineWidth = 10;
+  ctx.beginPath(); ctx.roundRect(8, 8, W - 16, H - 16, 34); ctx.stroke();
+  ctx.strokeStyle = "rgba(230,200,150,0.75)";
+  ctx.lineWidth = 6;
+  ctx.setLineDash([22, 16]);
+  ctx.beginPath(); ctx.roundRect(34, 34, W - 68, H - 68, 22); ctx.stroke();
+  ctx.setLineDash([]);
+
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.font = `700 132px Georgia, 'Times New Roman', serif`;
+  if ("letterSpacing" in ctx) ctx.letterSpacing = "18px";
+  const x = W / 2 + 9, y = H / 2 + 8;
+  ctx.fillStyle = "rgba(255,220,170,0.22)";   // light catching the lower lip of the cut
+  ctx.fillText(text, x + 3, y + 4);
+  ctx.fillStyle = "rgba(18,8,2,0.85)";        // the cut itself
+  ctx.fillText(text, x, y);
+  ctx.fillStyle = "rgba(0,0,0,0.35)";         // shadow inside the top edge
+  ctx.fillText(text, x - 2, y - 3);
+  return canvasTexture(c);
+}
+
+function glowTexture() {
+  const c = makeCanvas(64, 64), ctx = c.getContext("2d");
+  const g = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+  g.addColorStop(0, "rgba(255,255,255,1)");
+  g.addColorStop(0.25, "rgba(255,236,150,0.9)");
+  g.addColorStop(1, "rgba(255,200,60,0)");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 64, 64);
+  return new THREE.CanvasTexture(c);
+}
+
+function drawNewCard(canvas) {
+  const ctx = canvas.getContext("2d"), W = canvas.width, H = canvas.height;
+  ctx.fillStyle = "#fffdf8";
+  ctx.fillRect(0, 0, W, H);
+  ctx.strokeStyle = "#cfc7b5";
+  ctx.lineWidth = 8;
+  ctx.setLineDash([26, 18]);
+  ctx.strokeRect(24, 24, W - 48, H - 48);
+  ctx.setLineDash([]);
+  ctx.fillStyle = "#2b59c3";
+  ctx.textAlign = "center";
+  ctx.font = `300 150px ${FONT}`;
+  ctx.fillText("+", W / 2, H / 2 + 20);
+  ctx.font = `700 46px ${FONT}`;
+  ctx.fillText("New project", W / 2, H / 2 + 110);
+}
+
 // ── Component ─────────────────────────────────────────────
 AFRAME.registerComponent("tool-bag", {
   schema: { face: { type: "vec3", default: { x: 0, y: 0, z: -10 } } },
@@ -191,6 +253,7 @@ AFRAME.registerComponent("tool-bag", {
     this.homeMode = false;
     this.buildShadow();
     this.buildSparkles();
+    this.buildFairies();
     this.setProjects(window.SAMPLE_PROJECTS || []);
   },
 
@@ -285,33 +348,27 @@ AFRAME.registerComponent("tool-bag", {
       add(new THREE.CylinderGeometry(0.025, 0.025, 0.02, 12), this.brass, x * (L / 2 - 0.08), -0.04, z * (W1 / 2 - 0.06));
     }));
 
-    // Brass name plate on the front
-    const pc = makeCanvas(512, 128), pctx = pc.getContext("2d");
-    pctx.fillStyle = "#c9a24a"; pctx.fillRect(0, 0, 512, 128);
-    pctx.strokeStyle = "#8a6a22"; pctx.lineWidth = 8; pctx.strokeRect(6, 6, 500, 116);
-    pctx.fillStyle = "#4a3410"; pctx.textAlign = "center"; pctx.textBaseline = "middle";
-    pctx.font = `800 64px Georgia, 'Times New Roman', serif`;
-    pctx.fillText("PROJECTS", 256, 68);
+    // "PROJECTS" stamped into a stitched leather patch on the front
     const slope = Math.atan2((W1 - W2) / 2, H);
-    const plateY = H * 0.55;
-    const plateZ = W1 / 2 - ((W1 - W2) / 2) * (plateY / H) + 0.04;
-    const plate = add(new THREE.PlaneGeometry(0.34, 0.085), new THREE.MeshLambertMaterial({ map: canvasTexture(pc), emissive: "#2a1e06" }), 0, plateY, plateZ);
+    const plateY = H * 0.5;
+    const plateZ = W1 / 2 - ((W1 - W2) / 2) * (plateY / H) + 0.052;
+    const plate = add(new THREE.PlaneGeometry(0.56, 0.15), new THREE.MeshLambertMaterial({ map: engravedPatch("PROJECTS") }), 0, plateY, plateZ);
     plate.rotation.x = -slope;
 
     g.position.y = 0.04;
     return g;
   },
 
-  // Replace the cards with a new list of projects
+  // Replace the cards with a new list of projects (plus a "+ New project" card)
   setProjects(projects) {
     this.cards.forEach((c) => c.el.remove());
-    const n = projects.length;
-    this.cards = projects.map((p, i) => {
+    const list = [...projects, null];
+    this.cards = list.map((p, i) => {
       const canvas = makeCanvas(768, 480), tex = canvasTexture(canvas);
-      drawProjectCard(canvas, p);
+      if (p) drawProjectCard(canvas, p); else drawNewCard(canvas);
       const group = new THREE.Group();
       const face = new THREE.Mesh(new THREE.PlaneGeometry(1.0, 0.625), basic({ map: tex }));
-      const back = new THREE.Mesh(new THREE.PlaneGeometry(1.06, 0.685), basic({ color: "#6e4122" }));
+      const back = new THREE.Mesh(new THREE.PlaneGeometry(1.06, 0.685), basic({ color: p ? "#6e4122" : "#b9b1a0" }));
       back.position.z = -0.01;
       group.add(back, face);
 
@@ -321,26 +378,60 @@ AFRAME.registerComponent("tool-bag", {
         el.setObject3D("mesh", group);
         el.object3D.scale.setScalar(HIDDEN);
       }, { once: true });
-      el.addEventListener("click", () => { if (!pointer.dragged) this.showDetail(p, el); });
+      el.addEventListener("click", () => {
+        if (pointer.dragged) return;
+        if (!p) return this.el.emit("project-new");
+        // Editing needs a keyboard: outside VR open the editor, in VR show the read-only card
+        if (this.el.sceneEl.is("vr-mode")) this.showDetail(p, el);
+        else this.el.emit("project-open", { project: p });
+      });
       this.el.appendChild(el);
+      const t = list.length > 1 ? i / (list.length - 1) - 0.5 : 0;
+      const tucked = { pos: new THREE.Vector3(t * 0.6, 0.35, 0), quat: new THREE.Quaternion(), scale: HIDDEN };
+      return { el, p, tucked, present: tucked, delay: i * 0.08 };
+    });
+    if (this.open) this.layoutToViewer();
+  },
 
-      // fanned out in an arc above the open bag, tilted toward the middle
-      const t = n > 1 ? i / (n - 1) - 0.5 : 0;
-      const spread = Math.min(3.4, 0.95 * n);
-      const out = {
-        pos: new THREE.Vector3(t * spread, 1.05 + (0.25 - Math.abs(t) * 0.5) * 0.6, 0.15 - Math.abs(t) * 0.5),
-        rot: -t * 0.7,
-        scale: 1,
+  // Arrange the cards in rows across your current view, each turned to face you
+  layoutToViewer() {
+    const cam = document.getElementById("cam").getObject3D("camera");
+    const camPos = cam.getWorldPosition(new THREE.Vector3());
+    const gaze = cam.getWorldDirection(new THREE.Vector3());
+    gaze.y = Math.max(-0.35, Math.min(0.35, gaze.y));
+    gaze.normalize();
+    const right = new THREE.Vector3().crossVectors(gaze, new THREE.Vector3(0, 1, 0)).normalize();
+    const up = new THREE.Vector3().crossVectors(right, gaze).normalize();
+
+    const n = this.cards.length;
+    const cols = n <= 4 ? n : Math.min(4, Math.ceil(n / 2));
+    const rows = Math.ceil(n / cols);
+    const bag = this.el.object3D;
+    bag.updateMatrixWorld();
+    const toBag = bag.getWorldPosition(new THREE.Vector3()).distanceTo(camPos);
+    const dist = Math.max(1.3, Math.min(3.0, toBag - 0.9));
+    const f = dist / 3;                                  // shrink the layout when you're close
+    const gapX = 1.32 * f, gapY = 0.98 * f;
+    const bagQuatInv = bag.getWorldQuaternion(new THREE.Quaternion()).invert();
+    const bagScale = bag.getWorldScale(new THREE.Vector3()).x;
+
+    this.cards.forEach((c, i) => {
+      const r = Math.floor(i / cols), col = i % cols;
+      const inRow = r === rows - 1 ? n - r * cols : cols;
+      const x = (col - (inRow - 1) / 2) * gapX;
+      const y = ((rows - 1) / 2 - r) * gapY + 0.05;
+      const world = camPos.clone()
+        .addScaledVector(gaze, dist - (x * x * 0.08) / f)   // gentle curve toward you at the edges
+        .addScaledVector(right, x)
+        .addScaledVector(up, y);
+      const dummy = new THREE.Object3D();
+      dummy.position.copy(world);
+      dummy.lookAt(camPos);
+      c.present = {
+        pos: bag.worldToLocal(world.clone()),
+        quat: bagQuatInv.clone().multiply(dummy.quaternion),
+        scale: (1.18 * f) / bagScale,
       };
-      // Home view: bigger, wider arc, pulled toward you
-      const homeSpread = Math.min(5.6, 1.5 * n);
-      const home = {
-        pos: new THREE.Vector3(t * homeSpread, 1.35 + (0.25 - Math.abs(t)) * 0.5, 1.5 - Math.abs(t) * 1.4),
-        rot: -t * 0.9,
-        scale: 1.7,
-      };
-      const tucked = { pos: new THREE.Vector3(t * 0.6, 0.35, 0), rot: 0, scale: HIDDEN };
-      return { el, out, home, tucked, delay: i * 0.09, p };
     });
   },
 
@@ -348,6 +439,17 @@ AFRAME.registerComponent("tool-bag", {
     this.homeMode = on;
     if (on && !this.open) this.toggle();
     if (!on && this.open) this.toggle();
+  },
+
+  // Tinker Bell–style fairies that flit around the bag
+  buildFairies() {
+    const tex = glowTexture();
+    this.fairies = [0, 1, 2].map((i) => {
+      const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, color: "#ffb300", transparent: true, depthWrite: false, fog: false }));
+      sprite.scale.setScalar(0.12);
+      this.el.object3D.add(sprite);
+      return { sprite, phase: i * 2.1, speed: 0.75 + i * 0.3 };
+    });
   },
 
   // Gold sparkles that trail the cards as they fly
@@ -361,7 +463,7 @@ AFRAME.registerComponent("tool-bag", {
       vel: new Float32Array(N * 3),
       life: new Float32Array(N),
       points: new THREE.Points(geo, new THREE.PointsMaterial({
-        size: 0.07, vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
+        size: 0.08, map: glowTexture(), vertexColors: true, transparent: true, alphaTest: 0.02, depthWrite: false, fog: false,
       })),
     };
     this.sparkles.points.frustumCulled = false;
@@ -385,13 +487,14 @@ AFRAME.registerComponent("tool-bag", {
     const sp = this.sparkles;
     const P = sp.geo.attributes.position.array, C = sp.geo.attributes.color.array;
     for (let i = 0; i < sp.N; i++) {
-      if (sp.life[i] <= 0) { C[i * 3] = C[i * 3 + 1] = C[i * 3 + 2] = 0; continue; }
+      if (sp.life[i] <= 0) { P[i * 3 + 1] = -999; continue; }
       sp.life[i] -= step * 1.2;
       const a = Math.max(0, sp.life[i]);
       P[i * 3] += sp.vel[i * 3] * step;
       P[i * 3 + 1] += sp.vel[i * 3 + 1] * step;
       P[i * 3 + 2] += sp.vel[i * 3 + 2] * step;
-      C[i * 3] = 1 * a; C[i * 3 + 1] = 0.82 * a; C[i * 3 + 2] = 0.35 * a;
+      // gold fading back into the room's cream color
+      C[i * 3] = 0.95 + 0.05 * a; C[i * 3 + 1] = 0.93 - 0.2 * a; C[i * 3 + 2] = 0.88 - 0.7 * a;
     }
     sp.geo.attributes.position.needsUpdate = true;
     sp.geo.attributes.color.needsUpdate = true;
@@ -412,7 +515,12 @@ AFRAME.registerComponent("tool-bag", {
   toggle() {
     this.open = !this.open;
     this.openTime = this.el.sceneEl.time / 1000;
-    if (!this.open) this.hideDetail();
+    if (this.open) {
+      this.layoutToViewer();
+      for (let i = 0; i < 60; i++) this.emitSparkle(new THREE.Vector3((Math.random() - 0.5) * 0.9, 0.62, 0), 0.2);
+    } else {
+      this.hideDetail();
+    }
   },
 
   tick(t, dt) {
@@ -420,9 +528,23 @@ AFRAME.registerComponent("tool-bag", {
     const k = 1 - Math.exp(-step * 7);
     const o = this.el.object3D;
 
-    // gentle float
+    // gentle float, with a rattle every few seconds while closed (something's alive in there)
     o.position.y = this.base.y + Math.sin(sec * 1.1) * 0.06;
-    if (this.bag) this.bag.rotation.z = Math.sin(sec * 0.7) * 0.025;
+    const cycle = sec % 4.2;
+    const rattle = !this.open && cycle < 0.9 ? Math.sin((cycle / 0.9) * Math.PI) : 0;
+    if (this.bag) {
+      this.bag.rotation.z = Math.sin(sec * 0.7) * 0.025 + rattle * Math.sin(sec * 38) * 0.07;
+      this.bag.rotation.x = rattle * Math.sin(sec * 31) * 0.04;
+      this.bag.position.x = rattle * Math.sin(sec * 45) * 0.012;
+    }
+    if (rattle > 0.3) for (let j = 0; j < 3; j++) this.emitSparkle(new THREE.Vector3((Math.random() - 0.5) * 0.9, 0.64, (Math.random() - 0.5) * 0.06), 0.04);
+
+    this.fairies.forEach((f) => {
+      const a = sec * f.speed + f.phase;
+      f.sprite.position.set(Math.sin(a * 1.3) * 0.75, 0.6 + Math.sin(a * 2.1) * 0.22 + (this.open ? 0.4 : 0), Math.cos(a) * 0.45 + 0.1);
+      f.sprite.scale.setScalar(0.08 + Math.abs(Math.sin(sec * 9 + f.phase)) * 0.06);
+      if (Math.random() < 0.35) this.emitSparkle(f.sprite.position, 0.03);
+    });
     this.shadow.position.y = -o.position.y / o.scale.y + 0.02;
     const shadowScale = 1 - Math.sin(sec * 1.1) * 0.05;
     this.shadow.scale.set(shadowScale, shadowScale, 1);
@@ -430,7 +552,7 @@ AFRAME.registerComponent("tool-bag", {
     // jaws
     if (this.flaps) {
       this.flaps.forEach(({ hinge, side }) => {
-        const target = this.open ? side * 1.15 : -side * this.closedAngle;
+        const target = this.open ? side * 1.15 : -side * (this.closedAngle - rattle * 0.14);
         hinge.rotation.x += (target - hinge.rotation.x) * k;
       });
       this.gussets.forEach((gm) => {
@@ -444,10 +566,10 @@ AFRAME.registerComponent("tool-bag", {
       const co = c.el.object3D;
       if (!c.el.hasLoaded) return;
       const out = this.open && since > 0.25 + c.delay;
-      const goal = out ? (this.homeMode ? c.home : c.out) : c.tucked;
+      const goal = out ? c.present : c.tucked;
       const before = co.position.clone();
       co.position.lerp(goal.pos, k);
-      co.rotation.y += (goal.rot - co.rotation.y) * k;
+      co.quaternion.slerp(goal.quat, k);
       const s = co.scale.x + (goal.scale - co.scale.x) * k;
       co.scale.setScalar(s);
       co.visible = s > 0.01;

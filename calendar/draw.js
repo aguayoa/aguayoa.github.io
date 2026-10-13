@@ -512,3 +512,54 @@ function drawReminderPopup(canvas, title, reminders) {
   });
   return H / W;
 }
+
+// The Reminders toolbar button while it's "ringing": phone handset wiggling, sound waves, count badge
+function drawRingButton(canvas, count, t, ringing) {
+  const ctx = canvas.getContext("2d");
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = "#34c759";
+  roundRect(ctx, 6, 6, W - 12, H - 12, H / 2 - 6);
+  ctx.fill();
+
+  // handset, tilting back and forth while it rings
+  const px = H * 0.62, py = H / 2;
+  ctx.save();
+  ctx.translate(px, py);
+  ctx.rotate(ringing ? Math.sin(t * 40) * 0.35 : 0);
+  ctx.font = `${Math.round(H * 0.5)}px 'Segoe UI Emoji', 'Apple Color Emoji', 'Noto Color Emoji', sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText("📞", 0, 4);
+  ctx.restore();
+
+  // sound waves pulsing out of the phone
+  if (ringing) {
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineCap = "round";
+    for (let i = 0; i < 3; i++) {
+      const phase = (t * 2.2 + i / 3) % 1;
+      ctx.globalAlpha = 1 - phase;
+      ctx.lineWidth = 7;
+      ctx.beginPath();
+      ctx.arc(px, py, H * (0.32 + phase * 0.22), -0.7, 0.7);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  ctx.fillStyle = "#ffffff";
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  ctx.font = `800 ${Math.round(H * 0.34)}px ${FONT}`;
+  ctx.fillText("Reminders", H * 1.08, H / 2 + 3);
+
+  // red count badge
+  const r = H * 0.2, bx = W - r - 14, by = r + 10;
+  ctx.fillStyle = "#ff3b30";
+  ctx.beginPath(); ctx.arc(bx, by, r, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = "#ffffff";
+  ctx.textAlign = "center";
+  ctx.font = `800 ${Math.round(r * 1.2)}px ${FONT}`;
+  ctx.fillText(String(Math.min(count, 99)), bx, by + 2);
+}

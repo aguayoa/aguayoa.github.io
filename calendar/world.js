@@ -220,6 +220,25 @@ AFRAME.registerComponent("calendar-wall", {
       o.visible = o.scale.x > HIDDEN * 20;
     });
 
+    // Ringing Reminders button (on entering the room with new reminders)
+    if (this.ring) {
+      const sec = this.el.sceneEl.time / 1000, elapsed = sec - this.ring.t0;
+      if (elapsed > 15) {
+        this.stopRinging();
+      } else {
+        const b = this.buttons.find((x) => x.id === "reminders"), o = b.item.el.object3D;
+        const ringing = elapsed % 1.6 < 1.0;              // ring-ring … pause … ring-ring
+        o.visible = true;
+        o.scale.setScalar(1.3 + (ringing ? Math.abs(Math.sin(sec * 18)) * 0.08 : 0));
+        o.rotation.z = ringing ? Math.sin(sec * 55) * 0.1 : 0;
+        if (sec - this.ring.drawn > 0.06) {
+          drawRingButton(b.canvas, this.ring.count, elapsed, ringing);
+          b.tex.needsUpdate = true;
+          this.ring.drawn = sec;
+        }
+      }
+    }
+
     // VR drag-to-resize: move the controller up/right to grow, down/left to shrink
     const r = this.resizing;
     if (r && r.hand) {
@@ -309,7 +328,20 @@ AFRAME.registerComponent("calendar-wall", {
     this.applyLayout();
   },
 
+  startRinging(count) {
+    this.ring = { t0: this.el.sceneEl.time / 1000, count, drawn: 0 };
+  },
+
+  stopRinging() {
+    if (!this.ring) return;
+    this.ring = null;
+    const b = this.buttons.find((x) => x.id === "reminders");
+    b.item.el.object3D.rotation.z = 0;
+    this.applyLayout();
+  },
+
   onButton(id) {
+    if (id === "reminders") this.stopRinging();
     if (["year", "list", "reminders", "todo"].includes(id)) this.setLayout(id);
     if (id === "front") this.toggleFront(this.selected);
     if (id === "smaller") this.el.emit("wall-resize", { factor: 1 / 1.15 });

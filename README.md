@@ -28,10 +28,15 @@ Live at **https://aguayoa.github.io/**
 
 Shared: `assets/config.js` (settings), `assets/store.js` (data layer), `assets/account.js` (sign-in), `assets/sample.js` (visitor sample content).
 
+## Dashboard
+
+The homepage has a stats dashboard: active projects, steps done, reminders due this week, open to-dos and your day-summary streak, plus a progress bar per project and a 12-week activity grid (a day counts when you write its summary or finish a reminder).
+
 ## The Time Chamber
 
 - **Click the calendar** for its toolbar: **Year**, **Month list**, **Reminders**, **To-do**, **Bring to front**, **−** / **+**, **Reset**, and a corner handle to drag-resize.
 - **Click a day** to open its summary full screen. **Enter** saves, **Shift + Enter** adds a new line. You can add reminders for that day there too.
 - **Reminder dots** show on days with reminders. Click the dots for an iMessage-style bubble.
-- **Home** view brings your projects flying out of the 1960s tool bag.
+- **The tool bag** (stamped "PROJECTS", with fairies sparking around it) holds your projects. Click it and every project card flies up to wherever you're looking; click a card to edit it in place, or **+ New project** to add one. **Home** view walks you up to the bag and opens it.
+- When you enter the room with reminders due or newly added, the **Reminders** button rings like a phone for 15 seconds.
 - VR: open the page in your headset browser and press **VR**. Typing isn't possible in VR, so add things from a phone or computer and they sync.

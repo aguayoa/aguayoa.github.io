@@ -6,6 +6,7 @@
   <title>The Time Chamber</title>
   <script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+  <link rel="stylesheet" href="../assets/editor.css">
   <style>
     html, body { margin: 0; height: 100%; background: #f3efe6; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
     .hud {
@@ -154,7 +155,7 @@
 
   <div class="sheet" id="sheet" hidden>
     <div class="sheet-backdrop" id="sheet-backdrop"></div>
-    <div class="sheet-card" id="sheet-card" role="dialog" aria-modal="true"><div id="sheet-body"></div></div>
+    <div class="sheet-card" id="sheet-card" role="dialog" aria-modal="true" data-scroll><div id="sheet-body"></div></div>
   </div>
 
   <a-scene
@@ -205,6 +206,7 @@
   <script src="../assets/sample.js"></script>
   <script src="../assets/store.js"></script>
   <script src="../assets/account.js"></script>
+  <script src="../assets/project-editor.js"></script>
   <script src="../assets/events.js"></script>
   <script src="draw.js"></script>
   <script src="world.js"></script>

@@ -93,6 +93,15 @@ AFRAME.registerComponent("time-chamber", {
     els.wall.addEventListener("board-action", (e) => boardAction(e.detail.action, e.detail.id));
     els.bag = document.getElementById("toolbag").components["tool-bag"];
     ensureBubble();   // create it now so it's loaded before the first click
+    els.bag.el.addEventListener("project-open", (e) => openProjectSheet(e.detail.project));
+    els.bag.el.addEventListener("project-new", () => run(async () => {
+      const created = await Store.projects.create({
+        name: "New project", icon: "📁", status: "planning", category: "", tagline: "",
+        link: "", overview: "", focus: [], tasks: [], position: 999,
+      });
+      await loadData();
+      openProjectSheet(created, true);
+    }));
     setView(state.view);
     setPowered(state.powered);
 
@@ -100,7 +109,7 @@ AFRAME.registerComponent("time-chamber", {
     Store.init().then((s) => {
       Account.mount(document.getElementById("account"));
       showMode(s);
-      loadData();
+      loadData().then(checkNewReminders);
       Store.onChange((st) => { showMode(st); loadData(); });
     });
     document.addEventListener("visibilitychange", () => { if (!document.hidden) loadData(); });
@@ -284,7 +293,8 @@ function goHome() {
   const d = B.clone().sub(P);
   state.look.yaw = state.vrYaw = state.facing = Math.atan2(-d.x, -d.z);
   state.look.pitch = 0.14;
-  els.bag.setHome(true);
+  // wait a moment so the camera is in place before the cards fly to your view
+  setTimeout(() => els.bag.setHome(true), 150);
 }
 
 function setPowered(on) {
@@ -427,6 +437,37 @@ function bubblesHTML(list) {
       <button type="button" class="imsg-bubble" style="--c:${esc(r.color)}" data-toggle-rem="${esc(r.id)}" title="Mark ${r.done ? "not done" : "done"}">${esc(r.title)}</button>
       <div class="imsg-meta">${esc(timeLabel(r.due_time))}${r.done ? " · Done" : ""} · <button type="button" class="link" data-del-rem="${esc(r.id)}">Delete</button></div>
     </div>`).join("");
+}
+
+// Entering the room: ring the Reminders button for 15 s if anything is due or new since last time
+function checkNewReminders() {
+  const KEY = "aware-room-last-visit";
+  let last = 0;
+  try { last = Number(localStorage.getItem(KEY) || 0); } catch {}
+  const today = todayKey();
+  const fresh = roomData.reminders.filter((r) =>
+    !r.done && (r.due_date <= today || (r.created_at && Date.parse(r.created_at) > last)));
+  if (fresh.length) els.wallC.startRinging(fresh.length);
+  try { localStorage.setItem(KEY, String(Date.now())); } catch {}
+}
+
+// ── Project editor (pop-out) ──────────────────────────────
+function openProjectSheet(project, isNew) {
+  let editor;
+  openSheet(`
+    <header class="sh-head">
+      <div><p class="sh-kicker">Project</p></div>
+      <button type="button" class="sh-x" data-close aria-label="Close">✕</button>
+    </header>
+    <div id="proj-editor"></div>`, async () => {
+    if (editor) await editor.flush();
+    await loadData();
+  });
+  editor = ProjectEditor.mount(document.getElementById("proj-editor"), project, {
+    onDelete: async () => { editor = null; await closeSheet(false); },
+  });
+  document.querySelectorAll("#proj-editor .reveal").forEach((el) => { el.style.opacity = 1; });
+  if (isNew) editor.focusName();
 }
 
 // ── Day summary ───────────────────────────────────────────

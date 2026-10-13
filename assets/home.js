@@ -10,7 +10,7 @@ const pct = (p) => (p.tasks && p.tasks.length ? Math.round((p.tasks.filter((t) =
 let projects = [];
 let current = null;          // project open in the zoom view
 let currentCard = null;
-let saveTimer = null;
+let editor = null;
 
 // ── Boot ──────────────────────────────────────────────────
 (async function boot() {
@@ -52,6 +52,7 @@ async function refresh() {
     console.error(e);
   }
   renderGrid();
+  renderDashboard().catch((e) => console.error(e));
   $("admin").hidden = !s.isAdmin;
   if (s.isAdmin) loadVisitors();
 }
@@ -88,18 +89,18 @@ async function newProject() {
   await refresh();
   const card = document.querySelector(`.project[data-id="${CSS.escape(created.id)}"]`);
   await openProject(created.id, card);
-  const name = $("z-name");
-  name.focus();
-  name.select();
+  editor.focusName();
 }
 
 // ── Zoom view ─────────────────────────────────────────────
 async function openProject(id, card) {
   const p = projects.find((x) => x.id === id);
   if (!p) return;
-  current = JSON.parse(JSON.stringify(p));
+  current = p;
   currentCard = card;
-  renderEditor();
+  editor = ProjectEditor.mount($("zoom-body"), p, {
+    onDelete: async () => { editor = null; card.remove(); await closeProject(); },
+  });
 
   const zoom = $("zoom"), panel = $("zoom-panel");
   zoom.hidden = false;
@@ -125,7 +126,7 @@ async function openProject(id, card) {
 
 async function closeProject() {
   if (!current) return;
-  await flushSave();
+  if (editor) await editor.flush();
   const id = current.id;
   current = null;
   await refresh();
@@ -158,127 +159,86 @@ async function closeProject() {
   finish();
 }
 
-// ── Editor ────────────────────────────────────────────────
-function renderEditor() {
-  const p = current;
-  const statusOptions = Object.entries(STATUS)
-    .map(([v, label]) => `<option value="${v}" ${v === p.status ? "selected" : ""}>${label}</option>`).join("");
-  $("zoom-body").innerHTML = `
-    <div class="z-head reveal">
-      <input class="ed ed-icon" id="z-icon" value="${esc(p.icon)}" maxlength="4" aria-label="Icon (emoji)">
-      <input class="ed ed-name" id="z-name" value="${esc(p.name)}" aria-label="Project name">
-    </div>
-    <input class="ed ed-tagline reveal" id="z-tagline" value="${esc(p.tagline)}" placeholder="One-line description" aria-label="Tagline">
-    <div class="z-meta reveal">
-      <select id="z-status" aria-label="Status">${statusOptions}</select>
-      <input id="z-category" value="${esc(p.category)}" placeholder="Category" aria-label="Category">
-      <input id="z-link" value="${esc(p.link)}" placeholder="Website (optional)" aria-label="Website">
-    </div>
+// ── Dashboard ─────────────────────────────────────────────
+const dayKey = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
-    <div class="z-section reveal">
-      <h3>Overview</h3>
-      <textarea class="ed" id="z-overview" placeholder="What is this project about?">${esc(p.overview)}</textarea>
-    </div>
+async function renderDashboard() {
+  const [reminders, todos, notes] = await Promise.all([Store.reminders.list(), Store.todos.list(), Store.notes.all()]);
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const todayK = dayKey(today);
+  const in7 = new Date(today); in7.setDate(in7.getDate() + 7);
 
-    <div class="z-section reveal">
-      <h3>Current focus</h3>
-      <ul class="z-list" id="z-focus">${(p.focus || []).map((f, i) => `
-        <li><input class="ed" data-focus="${i}" value="${esc(f)}" aria-label="Focus ${i + 1}">
-        <button type="button" class="z-del" data-del-focus="${i}" aria-label="Remove">✕</button></li>`).join("")}
-      </ul>
-      <button type="button" class="ghost-btn z-add" id="z-add-focus">+ Add focus</button>
-    </div>
+  // activity per day: a written summary + each reminder finished (counted on its day)
+  const activity = {};
+  Object.keys(notes).forEach((k) => { activity[k] = (activity[k] || 0) + 1; });
+  reminders.filter((r) => r.done).forEach((r) => { activity[r.due_date] = (activity[r.due_date] || 0) + 1; });
 
-    <div class="z-section reveal">
-      <h3>Next steps · <span id="z-progress">${pct(p)}%</span></h3>
-      <div class="progress"><div class="bar"><span id="z-bar" style="width:${pct(p)}%"></span></div></div>
-      <ul class="z-list" id="z-tasks">${(p.tasks || []).map((t, i) => `
-        <li class="${t.done ? "done" : ""}">
-          <input type="checkbox" data-task-done="${i}" ${t.done ? "checked" : ""} aria-label="Done">
-          <input class="ed" data-task="${i}" value="${esc(t.text)}" aria-label="Step ${i + 1}">
-          <button type="button" class="z-del" data-del-task="${i}" aria-label="Remove">✕</button>
-        </li>`).join("")}
-      </ul>
-      <button type="button" class="ghost-btn z-add" id="z-add-task">+ Add step</button>
-    </div>
+  // summary streaks
+  let current = 0;
+  const cursor = new Date(today);
+  if (!notes[todayK]) cursor.setDate(cursor.getDate() - 1);   // today isn't over yet
+  while (notes[dayKey(cursor)]) { current++; cursor.setDate(cursor.getDate() - 1); }
+  let best = 0, run = 0, prev = null;
+  Object.keys(notes).sort().forEach((k) => {
+    const d = new Date(k + "T00:00:00");
+    run = prev && (d - prev) / 86400000 === 1 ? run + 1 : 1;
+    best = Math.max(best, run);
+    prev = d;
+  });
 
-    <div class="z-foot reveal">
-      <button type="button" class="ghost-btn danger" id="z-delete">Delete project</button>
-      <span class="z-status" id="z-status-text">${Store.state().signedIn ? "Changes save automatically" : "Sandbox: saved in this browser"}</span>
-    </div>`;
+  const tasks = projects.flatMap((p) => p.tasks || []);
+  const doneTasks = tasks.filter((t) => t.done).length;
+  const active = projects.filter((p) => p.status === "active").length;
+  const dueSoon = reminders.filter((r) => !r.done && r.due_date >= todayK && r.due_date < dayKey(in7)).length;
+  const overdue = reminders.filter((r) => !r.done && r.due_date < todayK).length;
+  const openTodos = todos.filter((t) => !t.done).length;
 
-  const body = $("zoom-body");
-  body.oninput = (e) => { readField(e.target); scheduleSave(); };
-  body.onchange = (e) => { if (e.target.matches("select, [type=checkbox]")) { readField(e.target); scheduleSave(); } };
-  body.onclick = (e) => {
-    const t = e.target;
-    if (t.id === "z-add-focus") { current.focus.push(""); rerenderAndFocus(`[data-focus="${current.focus.length - 1}"]`); }
-    if (t.id === "z-add-task") { current.tasks.push({ text: "", done: false }); rerenderAndFocus(`[data-task="${current.tasks.length - 1}"]`); }
-    if (t.dataset.delFocus) { current.focus.splice(Number(t.dataset.delFocus), 1); rerenderAndFocus(); scheduleSave(); }
-    if (t.dataset.delTask) { current.tasks.splice(Number(t.dataset.delTask), 1); rerenderAndFocus(); scheduleSave(); }
-    if (t.id === "z-delete") deleteCurrent();
-  };
-  body.onkeydown = (e) => {
-    // Enter in a list item adds the next one
-    if (e.key === "Enter" && e.target.matches("[data-task]")) { e.preventDefault(); $("z-add-task").click(); }
-    if (e.key === "Enter" && e.target.matches("[data-focus]")) { e.preventDefault(); $("z-add-focus").click(); }
-  };
-}
+  const tile = (k, v, sub) => `<div class="tile"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div><div class="s">${esc(sub)}</div></div>`;
+  $("tiles").innerHTML = [
+    tile("Active projects", active, `of ${projects.length} total`),
+    tile("Steps done", `${tasks.length ? Math.round((doneTasks / tasks.length) * 100) : 0}%`, `${doneTasks} of ${tasks.length} steps`),
+    tile("Reminders this week", dueSoon, overdue ? `${overdue} overdue` : "none overdue"),
+    tile("Open to-dos", openTodos, `${todos.length - openTodos} done`),
+    tile("Summary streak", `${current} day${current === 1 ? "" : "s"}`, `best ${best}`),
+  ].join("");
+  $("dash-mode").textContent = Store.state().signedIn ? "" : "Sample data";
 
-function rerenderAndFocus(selector) {
-  const scroll = $("zoom-body").scrollTop;
-  renderEditor();
-  $("zoom-body").querySelectorAll(".reveal").forEach((el) => { el.style.opacity = 1; });
-  $("zoom-body").scrollTop = scroll;
-  if (selector) $("zoom-body").querySelector(selector)?.focus();
-}
+  $("proj-bars").innerHTML = projects.map((p) => {
+    const total = (p.tasks || []).length, done = (p.tasks || []).filter((t) => t.done).length, v = pct(p);
+    return `<div class="bar-row" data-tip="${esc(`${p.name}: ${done} of ${total} steps done`)}">
+      <span class="name">${esc(p.icon || "")} ${esc(p.name)}</span><span class="val">${v}%</span>
+      <div class="bar"><span style="width:${v}%"></span></div></div>`;
+  }).join("") || `<p class="muted">No projects yet.</p>`;
 
-function readField(el) {
-  const p = current;
-  const map = { "z-icon": "icon", "z-name": "name", "z-tagline": "tagline", "z-status": "status", "z-category": "category", "z-link": "link", "z-overview": "overview" };
-  if (map[el.id]) p[map[el.id]] = el.value;
-  if (el.dataset.focus !== undefined) p.focus[Number(el.dataset.focus)] = el.value;
-  if (el.dataset.task !== undefined) p.tasks[Number(el.dataset.task)].text = el.value;
-  if (el.dataset.taskDone !== undefined) {
-    p.tasks[Number(el.dataset.taskDone)].done = el.checked;
-    el.closest("li").classList.toggle("done", el.checked);
-    $("z-progress").textContent = `${pct(p)}%`;
-    $("z-bar").style.width = `${pct(p)}%`;
+  // 12 weeks of days, one column per week (Sunday at the top)
+  const start = new Date(today);
+  start.setDate(start.getDate() - start.getDay() - 7 * 11);
+  const cells = [];
+  for (let i = 0; i < 84; i++) {
+    const d = new Date(start); d.setDate(start.getDate() + i);
+    const k = dayKey(d), n = activity[k] || 0;
+    const level = n === 0 ? 0 : n === 1 ? 1 : n === 2 ? 2 : 3;
+    const label = `${d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}: ${n ? `${n} activit${n === 1 ? "y" : "ies"}${notes[k] ? " · summary written" : ""}` : "no activity"}`;
+    cells.push(`<i data-l="${level}" class="${d > today ? "future" : ""}${k === todayK ? " today" : ""}" role="gridcell" aria-label="${esc(label)}" data-tip="${esc(label)}"></i>`);
   }
+  $("heat").innerHTML = cells.join("");
 }
 
-function scheduleSave() {
-  $("z-status-text").textContent = "Saving…";
-  clearTimeout(saveTimer);
-  saveTimer = setTimeout(save, 600);
-}
-
-async function save() {
-  if (!current) return;
-  const { id, user_id, created_at, updated_at, position, ...patch } = current;
-  patch.focus = patch.focus.map((f) => f.trim()).filter(Boolean);
-  patch.tasks = patch.tasks.filter((t) => t.text.trim());
-  patch.name = patch.name.trim() || "Untitled project";
-  try {
-    await Store.projects.update(id, patch);
-    $("z-status-text").textContent = Store.state().signedIn ? "Saved" : "Saved in this browser";
-  } catch (e) {
-    $("z-status-text").textContent = `Couldn't save: ${e.message}`;
-  }
-}
-
-async function flushSave() {
-  if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; await save(); }
-}
-
-async function deleteCurrent() {
-  if (!confirm(`Delete "${current.name}"? This can't be undone.`)) return;
-  clearTimeout(saveTimer);
-  saveTimer = null;
-  await Store.projects.remove(current.id);
-  if (currentCard) currentCard.remove();
-  await closeProject();
-}
+// Hover tooltips for dashboard marks
+document.addEventListener("pointerover", (e) => {
+  const t = e.target.closest("[data-tip]");
+  const tip = $("tip");
+  if (!t) { tip.hidden = true; return; }
+  tip.textContent = t.dataset.tip;
+  tip.hidden = false;
+});
+document.addEventListener("pointermove", (e) => {
+  const tip = $("tip");
+  if (tip.hidden) return;
+  const x = Math.min(e.clientX + 14, innerWidth - tip.offsetWidth - 8);
+  tip.style.left = `${x}px`;
+  tip.style.top = `${e.clientY + 16}px`;
+});
 
 // ── Import / export ───────────────────────────────────────
 async function exportAll() {

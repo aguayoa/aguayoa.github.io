@@ -6,6 +6,7 @@
   <title>Aware Life</title>
   <link rel="stylesheet" href="assets/style.css">
   <link rel="stylesheet" href="assets/home.css">
+  <link rel="stylesheet" href="assets/editor.css">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 </head>
 <body>
@@ -35,6 +36,24 @@
         <span class="card-cta">Enter the room →</span>
       </div>
     </a>
+
+    <section class="section" aria-labelledby="dash-title">
+      <div class="section-head"><h2 id="dash-title">Dashboard</h2><span class="muted" id="dash-mode"></span></div>
+      <div class="tiles" id="tiles"></div>
+      <div class="dash-grid">
+        <div class="panel-card">
+          <h3>Project progress</h3>
+          <div id="proj-bars" class="bars-list"></div>
+        </div>
+        <div class="panel-card">
+          <h3>Activity · last 12 weeks</h3>
+          <p class="muted small">A day counts when you write its summary or finish a reminder.</p>
+          <div class="heat-wrap"><div id="heat" class="heat" role="grid" aria-label="Daily activity, last 12 weeks"></div></div>
+          <div class="heat-legend" aria-hidden="true">Less <i data-l="0"></i><i data-l="1"></i><i data-l="2"></i><i data-l="3"></i> More</div>
+        </div>
+      </div>
+      <div class="tip-box" id="tip" role="tooltip" hidden></div>
+    </section>
 
     <section class="section" aria-labelledby="projects-title">
       <div class="section-head">
@@ -66,11 +85,11 @@
   <!-- Project zoom view -->
   <div class="zoom" id="zoom" hidden>
     <div class="zoom-backdrop" id="zoom-backdrop"></div>
-    <article class="zoom-panel" id="zoom-panel" role="dialog" aria-modal="true" aria-labelledby="z-name">
+    <article class="zoom-panel" id="zoom-panel" role="dialog" aria-modal="true" aria-label="Project">
       <div class="zoom-glow" aria-hidden="true"></div>
       <div class="zoom-shine" aria-hidden="true"></div>
       <button type="button" class="zoom-close" id="zoom-close" aria-label="Close">✕</button>
-      <div class="zoom-body" id="zoom-body"></div>
+      <div class="zoom-body" id="zoom-body" data-scroll></div>
     </article>
   </div>
 
@@ -78,6 +97,7 @@
   <script src="assets/sample.js"></script>
   <script src="assets/store.js"></script>
   <script src="assets/account.js"></script>
+  <script src="assets/project-editor.js"></script>
   <script src="assets/home.js"></script>
 </body>
 </html>

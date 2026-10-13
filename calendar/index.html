@@ -90,7 +90,7 @@
         <button type="button" class="plain" id="respawn">Back to start</button>
       </div>
 
-      <p class="tip">Click the calendar to change its layout or size. Click a day to write its summary.</p>
+      <p class="tip">Click the calendar to change its layout or size. Click a day to write its summary.<br>Your projects are in the floating tool bag. Click it to open.</p>
 
       <details class="sub">
         <summary>Day summaries</summary>
@@ -111,6 +111,7 @@
           <li><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> or <kbd>V</kbd> change view · <kbd>F</kbd> power up</li>
           <li>Click the calendar → <strong>Year</strong> / <strong>Month list</strong> / <strong>Bring to front</strong>, <strong>−</strong> / <strong>+</strong>, or drag the blue corner handle to resize</li>
           <li>Click a month's name to bring it to the front · click a day for its summary · <kbd>Esc</kbd> closes</li>
+          <li>Click the tool bag to open or close it · click a project card for details</li>
         </ul>
         <ul class="keys">
           <li><strong>VR:</strong> press <strong>VR</strong> (bottom right)</li>
@@ -160,6 +161,9 @@
     <!-- The giant calendar (origin = bottom-center, so it scales from the floor) -->
     <a-entity id="wall" calendar-wall position="0 0 -22.4"></a-entity>
 
+    <!-- Projects: a floating 1960s tool bag -->
+    <a-entity id="toolbag" tool-bag position="-4.5 1.3 -14" scale="1.4 1.4 1.4"></a-entity>
+
     <!-- The fighter (shown in third person and overview) -->
     <a-entity id="player" fighter-avatar></a-entity>
 
@@ -172,8 +176,10 @@
   </a-scene>
 
   <script src="../assets/events.js"></script>
+  <script src="../assets/projects.js"></script>
   <script src="draw.js"></script>
   <script src="world.js"></script>
+  <script src="toolbag.js"></script>
   <script src="game.js"></script>
 </body>
 </html>

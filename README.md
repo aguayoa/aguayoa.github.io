@@ -9,8 +9,8 @@ My personal homepage: a Projects section with a page per project, and a walk-in 
 | Page | URL | File |
 |---|---|---|
 | Home | `/` | `index.html` |
-| Projects | `/projects/` | `projects/index.html`, `projects/project.html` |
-| Calendar (VR) | `/calendar/` | `calendar/index.html` |
+| The Time Chamber (VR room: calendar + projects tool bag) | `/calendar/` | `calendar/` |
+| Plain project list (for phones) | `/projects/` | `projects/index.html`, `projects/project.html` |
 
 ## Files you edit
 
@@ -27,6 +27,10 @@ My personal homepage: a Projects section with a page per project, and a walk-in 
 - **Change status:** set `status` to `active`, `planning`, `talks`, `paused`, or `done`.
 - **Add a project:** copy one `{ ... }` block in `assets/projects.js` and give it a new `id`.
 - **Add a calendar event:** add `{ date: "2026-03-15", title: "Short title" }` to `assets/events.js`.
+
+## Projects tool bag
+
+Your projects float in the room inside a 1960s leather tool bag. Click the bag to open it and a card for each project rises out; click a card to see its overview, focus, and next steps. Cards are built from `assets/projects.js`, so editing that file updates the bag too.
 
 ## Calendar
 

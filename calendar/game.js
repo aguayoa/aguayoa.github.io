@@ -123,7 +123,11 @@ AFRAME.registerComponent("time-chamber", {
     }, { passive: false });
 
     window.addEventListener("keydown", (e) => {
-      if (e.code === "Escape") { if (!closeDay()) els.wallC.clearFront(); return; }
+      if (e.code === "Escape") {
+        const bag = document.getElementById("toolbag").components["tool-bag"];
+        if (!closeDay() && !(bag && bag.hideDetail())) els.wallC.clearFront();
+        return;
+      }
       if (e.target.closest && e.target.closest("input, button, select, textarea")) return;
       state.keys.add(e.code);
       if (e.code === "Digit1") setView("first");

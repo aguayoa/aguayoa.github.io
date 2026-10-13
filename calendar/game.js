@@ -38,7 +38,8 @@ state.layout = ["year", "list", "reminders", "todo"].includes(saved.layout) ? sa
 const persist = () => store.save({ view: state.view, wall: state.wall, powered: state.powered, layout: state.layout });
 
 // Your data, loaded from the Store (Supabase when signed in, a browser sandbox otherwise)
-window.roomData = { reminders: [], todos: [], events: [], notes: {} };
+// streaks: { "YYYY-MM-DD": { fitness: true, ... } } — filled by connected sources (Strava, etc.) later
+window.roomData = { reminders: [], todos: [], events: [], notes: {}, streaks: {} };
 const eventsOn = (key) => (roomData.events || []).filter((e) => e.start_date <= key && key <= e.end_date);
 const clamp = (v, [lo, hi]) => Math.min(hi, Math.max(lo, v));
 
@@ -90,6 +91,14 @@ AFRAME.registerComponent("time-chamber", {
     els.wall.addEventListener("wall-reset", () => { state.wall = { ...WALL_DEFAULT }; applyWall(); persist(); });
     els.wall.addEventListener("layout-changed", (e) => { state.layout = e.detail.layout; persist(); });
     els.wall.addEventListener("day-selected", (e) => openDay(e.detail.key));
+    els.wall.addEventListener("streak-click", (e) => {
+      const area = STREAK_AREAS.find((a) => a.id === e.detail.area);
+      const done = roomData.streaks[e.detail.key] && roomData.streaks[e.detail.key][area.id];
+      showBubble(`${area.label} streak · ${dayLabel(e.detail.key)}`, [
+        { title: done ? `${area.label} done ✅` : `No ${area.label.toLowerCase()} logged yet.`, color: area.color, note: !done },
+        { title: `This box fills in automatically from ${area.source} once it's connected in the Skill room (your mental gym). Coming soon.`, note: true },
+      ], e.detail.point);
+    });
     els.wall.addEventListener("range-selected", (e) => openEventSheet({ start: e.detail.start, end: e.detail.end }));
     els.wall.addEventListener("event-open", (e) => {
       const ev = roomData.events.find((x) => x.id === e.detail.id);

@@ -626,3 +626,220 @@ function drawRingButton(canvas, count, t, ringing) {
   ctx.font = `800 ${Math.round(r * 1.2)}px ${FONT}`;
   ctx.fillText(String(Math.min(count, 99)), bx, by + 2);
 }
+
+// ── Overview: the whole fiscal year, one row per month, every day side by side ──
+
+// Streak areas shown as boxes at the bottom of every day. They fill in from connected sources
+// (Strava, etc.) once the Skill room exists; until then they're empty outlines.
+const STREAK_AREAS = [
+  { id: "fitness", label: "Fitness", source: "Strava", color: "#fc4c02" },
+  { id: "mind", label: "Mind", source: "Meditation", color: "#6b46c1" },
+  { id: "learn", label: "Learning", source: "Courses", color: "#2b59c3" },
+  { id: "sleep", label: "Sleep", source: "Sleep tracker", color: "#1f8a4c" },
+];
+
+const PLAN = { W: 4096, H: 3072, pad: 36, labelW: 340, headH: 210, lanes: 2 };
+function plannerGeom() {
+  const x0 = PLAN.pad + PLAN.labelW;
+  return { x0, y0: PLAN.headH, cw: (PLAN.W - x0 - PLAN.pad) / 31, rh: (PLAN.H - PLAN.headH - PLAN.pad) / 12 };
+}
+
+// Draws the year planner. Fills `hits` with clickable areas:
+// {type: "event"|"streak"|"dots"|"month"|"day", x, y, w, h, key?, eventId?, area?, index?}
+function drawPlanner(canvas, fy, data, hits, selection, selectedKey) {
+  const ctx = canvas.getContext("2d");
+  const W = canvas.width, H = canvas.height;
+  const { x0, y0, cw, rh } = plannerGeom();
+  const months = fiscalMonths(fy);
+  const today = todayKey();
+  const notes = data.notes || {}, streaks = data.streaks || {}, events = data.events || [];
+  const reminders = {};
+  (data.reminders || []).forEach((r) => (reminders[r.due_date] ||= []).push(r));
+  const inSel = (k) => selection && k >= selection.start && k <= selection.end;
+
+  ctx.fillStyle = "#fffdf8";
+  ctx.fillRect(0, 0, W, H);
+
+  // ── header: title, streak legend, day numbers ──
+  const a = months[0], b = months[11];
+  ctx.textBaseline = "alphabetic";
+  ctx.textAlign = "left";
+  ctx.fillStyle = "#1b1b1a";
+  ctx.font = `800 84px ${FONT}`;
+  ctx.fillText(`FY${fy} Overview`, PLAN.pad, 100);
+  const tw = ctx.measureText(`FY${fy} Overview`).width;
+  ctx.fillStyle = "#8a857a";
+  ctx.font = `500 44px ${FONT}`;
+  ctx.fillText(`${MONTHS_SHORT[a.month]} ${a.year} – ${MONTHS_SHORT[b.month]} ${b.year} · ${months.reduce((n, m) => n + daysInMonth(m.year, m.month), 0)} days`, PLAN.pad + tw + 30, 100);
+
+  ctx.textAlign = "right";
+  let lx = W - PLAN.pad;
+  ctx.font = `600 34px ${FONT}`;
+  [...STREAK_AREAS].reverse().forEach((s) => {
+    const label = `${s.label} · ${s.source}`;
+    ctx.fillStyle = "#4a4a46";
+    ctx.fillText(label, lx, 96);
+    lx -= ctx.measureText(label).width + 16;
+    ctx.fillStyle = s.color;
+    ctx.beginPath(); ctx.roundRect(lx - 30, 70, 30, 30, 6); ctx.fill();
+    lx -= 70;
+  });
+  ctx.fillStyle = "#8a857a";
+  ctx.font = `600 34px ${FONT}`;
+  ctx.fillText("Streaks:", lx + 20, 96);
+
+  ctx.textAlign = "center";
+  ctx.font = `700 34px ${FONT}`;
+  for (let d = 1; d <= 31; d++) {
+    ctx.fillStyle = "#8a857a";
+    ctx.fillText(String(d), x0 + (d - 1) * cw + cw / 2, y0 - 22);
+  }
+  ctx.fillStyle = "#e6e0d3";
+  ctx.fillRect(PLAN.pad, y0 - 6, W - PLAN.pad * 2, 4);
+
+  const laneY = 112, laneH = 30, laneGap = 4;
+  const boxSize = Math.floor((cw - 16 - 3 * 5) / 4);
+
+  months.forEach((m, i) => {
+    const y = y0 + i * rh;
+    const days = daysInMonth(m.year, m.month);
+    const qc = Q_COLORS[m.quarter - 1];
+
+    // month label
+    ctx.fillStyle = qc;
+    ctx.fillRect(PLAN.pad, y + 8, 12, rh - 16);
+    ctx.textAlign = "left";
+    ctx.fillStyle = "#1b1b1a";
+    ctx.font = `800 62px ${FONT}`;
+    ctx.fillText(MONTHS[m.month], PLAN.pad + 34, y + rh * 0.46);
+    ctx.fillStyle = "#8a857a";
+    ctx.font = `600 34px ${FONT}`;
+    ctx.fillText(`${days} days`, PLAN.pad + 34, y + rh * 0.46 + 48);
+    ctx.font = `500 30px ${FONT}`;
+    ctx.fillText(`${m.year} · Q${m.quarter}`, PLAN.pad + 34, y + rh * 0.46 + 88);
+    hits.push({ type: "month", index: i, x: PLAN.pad, y, w: PLAN.labelW, h: rh });
+
+    for (let d = 1; d <= 31; d++) {
+      const x = x0 + (d - 1) * cw;
+      if (d > days) {                                   // month is shorter: blank, hatched cell
+        ctx.fillStyle = "#f1ece2";
+        ctx.fillRect(x + 3, y + 3, cw - 6, rh - 6);
+        ctx.strokeStyle = "#e6dfd2";
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        for (let t = -rh; t < cw; t += 22) { ctx.moveTo(x + 3 + t, y + rh - 3); ctx.lineTo(x + 3 + t + rh, y + 3); }
+        ctx.save(); ctx.rect(x + 3, y + 3, cw - 6, rh - 6); ctx.clip(); ctx.stroke(); ctx.restore();
+        continue;
+      }
+      const key = keyOf(m.year, m.month, d);
+      const dow = new Date(m.year, m.month, d).getDay();
+      const weekend = dow === 0 || dow === 6;
+
+      ctx.fillStyle = inSel(key) ? "#dde6fb" : weekend ? "#f4efe4" : "#fffdf8";
+      ctx.fillRect(x + 3, y + 3, cw - 6, rh - 6);
+      ctx.strokeStyle = inSel(key) ? "#2b59c3" : "#ebe5d8";
+      ctx.lineWidth = 2;
+      ctx.strokeRect(x + 3, y + 3, cw - 6, rh - 6);
+
+      // weekday letter + day number
+      ctx.textAlign = "left";
+      ctx.fillStyle = weekend ? "#b0aa9d" : "#8a857a";
+      ctx.font = `700 22px ${FONT}`;
+      ctx.fillText("SMTWTFS"[dow], x + 12, y + 32);
+      ctx.font = `700 40px ${FONT}`;
+      if (key === today) {
+        ctx.fillStyle = "#2b59c3";
+        ctx.beginPath(); ctx.arc(x + 30, y + 70, 24, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = "#ffffff";
+        ctx.textAlign = "center";
+        ctx.fillText(String(d), x + 30, y + 84);
+      } else {
+        ctx.fillStyle = weekend ? "#a39d90" : "#1b1b1a";
+        ctx.fillText(String(d), x + 10, y + 84);
+      }
+
+      // gold dot = summary written
+      if (notes[key]) {
+        ctx.fillStyle = "#b7791f";
+        ctx.beginPath(); ctx.arc(x + cw - 18, y + 24, 9, 0, Math.PI * 2); ctx.fill();
+      }
+      // reminder dots (click for the iMessage bubble)
+      const rs = (reminders[key] || []).slice(0, 3);
+      rs.forEach((r, j) => {
+        ctx.fillStyle = r.done ? "#c7c7cc" : r.color || "#0a84ff";
+        ctx.beginPath(); ctx.arc(x + cw - 18 - j * 22, y + 62, 9, 0, Math.PI * 2); ctx.fill();
+      });
+      if (rs.length) hits.push({ type: "dots", key, x: x + cw - 30 - (rs.length - 1) * 22, y: y + 46, w: 24 + (rs.length - 1) * 22 + 8, h: 32 });
+
+      // streak boxes along the bottom
+      const by = y + rh - boxSize - 12;
+      const future = key > today;
+      STREAK_AREAS.forEach((s, j) => {
+        const bx = x + 8 + j * (boxSize + 5);
+        const done = streaks[key] && streaks[key][s.id];
+        ctx.beginPath();
+        ctx.roundRect(bx, by, boxSize, boxSize, 5);
+        if (done) {
+          ctx.fillStyle = s.color;
+          ctx.fill();
+        } else {
+          ctx.globalAlpha = future ? 0.25 : 0.55;
+          ctx.strokeStyle = s.color;
+          ctx.lineWidth = 3;
+          ctx.stroke();
+          ctx.globalAlpha = 1;
+        }
+        hits.push({ type: "streak", key, area: s.id, x: bx - 2, y: by - 2, w: boxSize + 4, h: boxSize + 4 });
+      });
+
+      hits.push({ type: "day", key, x, y, w: cw, h: rh });
+      if (key === selectedKey) {
+        ctx.strokeStyle = "#2b59c3";
+        ctx.lineWidth = 6;
+        ctx.strokeRect(x + 5, y + 5, cw - 10, rh - 10);
+      }
+    }
+
+    // event bars: straight runs across the row (2 lanes, "+N" past that)
+    const start = keyOf(m.year, m.month, 1), end = keyOf(m.year, m.month, days);
+    const spans = events
+      .filter((e) => e.start_date <= end && e.end_date >= start)
+      .map((e) => ({ e, a: e.start_date < start ? 1 : Number(e.start_date.slice(8)), b: e.end_date > end ? days : Number(e.end_date.slice(8)) }))
+      .sort((p, q) => p.a - q.a || (q.b - q.a) - (p.b - p.a));
+    const lanes = Array.from({ length: PLAN.lanes }, () => Array(32).fill(false));
+    const more = Array(32).fill(0);
+    spans.forEach(({ e, a, b }) => {
+      const lane = lanes.findIndex((l) => !l.slice(a, b + 1).some(Boolean));
+      if (lane < 0) { for (let d = a; d <= b; d++) more[d]++; return; }
+      for (let d = a; d <= b; d++) lanes[lane][d] = true;
+      const bx = x0 + (a - 1) * cw + 6, bw = (b - a + 1) * cw - 12, bY = y + laneY + lane * (laneH + laneGap);
+      ctx.fillStyle = e.color || "#2b59c3";
+      ctx.beginPath(); ctx.roundRect(bx, bY, bw, laneH, 8); ctx.fill();
+      if (e.start_date < start) ctx.fillRect(bx - 6, bY, 14, laneH);   // continues from last month
+      if (e.end_date > end) ctx.fillRect(bx + bw - 8, bY, 14, laneH);   // continues into next month
+      ctx.fillStyle = "#ffffff";
+      ctx.textAlign = "left";
+      ctx.font = `700 21px ${FONT}`;
+      ctx.fillText(fitText(ctx, e.title, bw - 16), bx + 8, bY + 22);
+      hits.push({ type: "event", eventId: e.id, x: bx, y: bY - 2, w: bw, h: laneH + 4 });
+    });
+    more.forEach((n, d) => {
+      if (!n) return;
+      ctx.fillStyle = "#6b6b66";
+      ctx.textAlign = "left";
+      ctx.font = `700 20px ${FONT}`;
+      ctx.fillText(`+${n}`, x0 + (d - 1) * cw + 10, y + laneY + PLAN.lanes * (laneH + laneGap) + 22);
+    });
+  });
+}
+
+// Topmost clickable thing at a planner pixel
+function plannerHit(hits, px, py) {
+  const order = ["event", "streak", "dots", "month", "day"];
+  let best = null;
+  for (const h of hits) {
+    if (px < h.x || px > h.x + h.w || py < h.y || py > h.y + h.h) continue;
+    if (!best || order.indexOf(h.type) < order.indexOf(best.type)) best = h;
+  }
+  return best;
+}

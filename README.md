@@ -34,7 +34,7 @@ The homepage has a stats dashboard: active projects, steps done, reminders due t
 
 ## The Time Chamber
 
-- **Click the calendar** for its toolbar: **Year** (12-month grid), **Overview** (months with their day counts down the left, selected month large), **Reminders**, **To-do**, **Bring to front**, **−** / **+**, **Reset**, and a corner handle to drag-resize.
+- **Click the calendar** for its toolbar: **Year** (12-month grid), **Overview** (the whole year: one row per month with its day count, every day side by side showing summaries, reminders, event bars and streak boxes), **Reminders**, **To-do**, **Bring to front**, **−** / **+**, **Reset**, and a corner handle to drag-resize.
 - **Events:** drag across days (or Shift+click a second day) to create a multi-day event like a trip. Events draw as colored bars across the days they cover; click a bar to edit or delete it. Single-day events work the same from the day summary's **+ Event** button.
 - **Click a day** to open its summary full screen. **Enter** saves, **Shift + Enter** adds a new line. You can add reminders for that day there too.
 - **Reminder dots** show on days with reminders. Click the dots for an iMessage-style bubble.

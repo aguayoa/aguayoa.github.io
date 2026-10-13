@@ -83,7 +83,7 @@ AFRAME.registerComponent("cell-pillar", {
 
 // ── Calendar wall ─────────────────────────────────────────
 // The wall entity's origin is the bottom-center of the calendar, so scaling keeps it on the floor.
-// Layouts: "year" (4×3 grid), "list" (month tabs down the left, selected month large on the right),
+// Layouts: "year" (4×3 grid), "list" = Overview (the whole year: one row per month, every day side by side),
 // "reminders" (an iMessage-style thread) or "todo" (a checklist). The last two replace the calendar.
 // Any month can also be brought to the front, floating in front of the viewer.
 // Clicking the calendar shows its controls: layout buttons, size buttons, and a drag-to-resize handle.
@@ -148,6 +148,15 @@ AFRAME.registerComponent("calendar-wall", {
     const boardFace = new THREE.Mesh(new THREE.PlaneGeometry(28, 20.5), basic({ map: this.boardTex }));
     const board = this.addClickable(boardFace, (e) => this.onBoardClick(boardFace, e));
     this.board = this.track(board, new THREE.Vector3(0, 12.1, 0.06), HIDDEN);
+
+    // Overview planner: the whole fiscal year on one big sheet
+    this.planCanvas = makeCanvas(PLAN.W, PLAN.H);
+    this.planTex = canvasTexture(this.planCanvas);
+    this.planHits = [];
+    this.planFace = new THREE.Mesh(new THREE.PlaneGeometry(28, 21), basic({ map: this.planTex }));
+    const planner = this.addClickable(this.planFace, (e) => this.onPlannerClick(e));
+    planner.addEventListener("mousedown", (e) => this.startPlannerDrag(e));
+    this.planner = this.track(planner, new THREE.Vector3(0, 12.3, 0.07), HIDDEN);
 
     // Toolbar (above the calendar) — hidden until the calendar is clicked
     const buttons = [
@@ -260,18 +269,20 @@ AFRAME.registerComponent("calendar-wall", {
     const boardView = this.layout === "reminders" || this.layout === "todo";
     this.setTarget(this.board, this.board.target.pos, boardView ? 1 : HIDDEN);
     if (boardView) this.renderBoard();
+    this.setTarget(this.planner, this.planner.target.pos, list ? 1 : HIDDEN);
+    if (list) this.renderPlanner();
     this.months.forEach((m, i) => {
       if (boardView) {
         this.setTarget(m.item, this.gridPos(i), HIDDEN);
       } else if (this.front === i && this.frontPose) {
         this.setTarget(m.item, this.frontPose.pos, this.frontPose.scale, this.frontPose.quat);
       } else if (list) {
-        this.setTarget(m.item, this.bigPos, i === this.selected ? this.bigScale : HIDDEN);
+        this.setTarget(m.item, this.gridPos(i), HIDDEN);
       } else {
         this.setTarget(m.item, this.gridPos(i), 1);
       }
     });
-    this.tabs.forEach((tab, i) => this.setTarget(tab.item, this.tabPos(i), list && !boardView ? 1 : HIDDEN));
+    this.tabs.forEach((tab, i) => this.setTarget(tab.item, this.tabPos(i), HIDDEN));
     const shown = this.controlsShown ? 1 : HIDDEN;
     this.buttons.forEach((b) => this.setTarget(b.item, b.item.target.pos, shown));
     this.setTarget(this.handle, this.handle.target.pos, shown);
@@ -387,6 +398,49 @@ AFRAME.registerComponent("calendar-wall", {
     this.el.emit("day-selected", { key });
   },
 
+  // ── Overview planner ────────────────────────────────────
+  plannerPixel(hit) {
+    if (!hit || hit.object !== this.planFace || !hit.uv) return null;
+    return [hit.uv.x * PLAN.W, (1 - hit.uv.y) * PLAN.H];
+  },
+
+  onPlannerClick(e) {
+    this.showControls(true);
+    if (this.el.sceneEl.time < this.suppressClickUntil) return;
+    const hit = e.detail.intersection, px = this.plannerPixel(hit);
+    if (!px) return;
+    const h = plannerHit(this.planHits, px[0], px[1]);
+    if (!h) return;
+    const point = hit.point.clone();
+    if (h.type === "event") return this.el.emit("event-open", { id: h.eventId, point });
+    if (h.type === "streak") return this.el.emit("streak-click", { key: h.key, area: h.area, point });
+    if (h.type === "dots") return this.el.emit("reminder-bubble", { key: h.key, point });
+    if (h.type === "month") { this.selected = h.index; return this.toggleFront(h.index); }
+    const me = e.detail.mouseEvent;
+    if (me && me.shiftKey && this.anchorDay && this.anchorDay !== h.key) return this.selectRange(this.anchorDay, h.key);
+    this.anchorDay = h.key;
+    this.selectedDay = h.key;
+    this.render();
+    this.el.emit("day-selected", { key: h.key });
+  },
+
+  startPlannerDrag(e) {
+    const px = this.plannerPixel(e.detail.intersection);
+    if (!px) return;
+    const h = plannerHit(this.planHits, px[0], px[1]);
+    if (!h || h.type !== "day") return;
+    const cursorEl = e.detail.cursorEl && e.detail.cursorEl !== this.el.sceneEl ? e.detail.cursorEl : this.el.sceneEl;
+    this.dayDrag = { startKey: h.key, lastKey: h.key, cursorEl };
+    pointer.dayDrag = true;
+    if (cursorEl !== this.el.sceneEl) cursorEl.addEventListener("mouseup", () => this.endDayDrag(), { once: true });
+  },
+
+  renderPlanner() {
+    this.planHits = [];
+    drawPlanner(this.planCanvas, this.fy, window.roomData || {}, this.planHits, this.selection, this.selectedDay);
+    this.planTex.needsUpdate = true;
+  },
+
   // ── Drag across days to make a multi-day event ──────────
   startDayDrag(i, face, e) {
     const hit = e.detail.intersection;
@@ -407,6 +461,11 @@ AFRAME.registerComponent("calendar-wall", {
   dayUnderCursor(cursorEl) {
     const rc = cursorEl.components.raycaster;
     if (!rc) return null;
+    if (this.layout === "list") {
+      const px = this.plannerPixel(rc.getIntersection(this.planner.el));
+      const h = px && plannerHit(this.planHits.filter((x) => x.type === "day"), px[0], px[1]);
+      return h ? h.key : null;
+    }
     const months = fiscalMonths(this.fy);
     for (let j = 0; j < 12; j++) {
       const m = this.months[j];
@@ -432,6 +491,7 @@ AFRAME.registerComponent("calendar-wall", {
   endDayDrag() {
     const d = this.dayDrag;
     if (!d) return;
+    this.updateDayDrag();          // catch the day under the cursor at the moment of release
     this.dayDrag = null;
     pointer.dayDrag = false;
     if (d.lastKey !== d.startKey) {
@@ -511,6 +571,7 @@ AFRAME.registerComponent("calendar-wall", {
       m.tex.needsUpdate = true;
     });
     if (this.layout === "reminders" || this.layout === "todo") this.renderBoard();
+    if (this.layout === "list") this.renderPlanner();
     drawTitle(this.titleCanvas, this.fy);
     this.titleTex.needsUpdate = true;
     this.renderControls();

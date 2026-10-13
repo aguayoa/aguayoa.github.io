@@ -39,10 +39,31 @@
     .chip[aria-pressed="true"] { background: #ffd84a; border-color: #e3b800; }
     details.sub { margin-top: 12px; border-top: 1px solid #ebe5d8; padding-top: 10px; }
     details.sub summary { cursor: pointer; font-weight: 600; }
-    .slider { display: grid; grid-template-columns: 82px 1fr 52px; align-items: center; gap: 8px; margin-top: 8px; }
-    .slider output { text-align: right; color: #6b6b66; font-variant-numeric: tabular-nums; }
-    .slider input { width: 100%; accent-color: #2b59c3; }
     .row { display: flex; gap: 6px; margin-top: 10px; }
+    .tip { margin: 12px 0 0; color: #6b6b66; line-height: 1.45; }
+    .day {
+      position: fixed; top: 16px; right: 16px; z-index: 11;
+      width: 340px; max-width: calc(100vw - 32px);
+      background: #fffdf8; border: 1px solid #e3ddd0; border-radius: 14px;
+      box-shadow: 0 8px 30px rgba(0,0,0,0.12);
+      padding: 16px; color: #1b1b1a; font-size: 0.9rem;
+    }
+    .day[hidden] { display: none; }
+    .day header { display: flex; justify-content: space-between; align-items: start; gap: 8px; }
+    .day h2 { font-size: 1.05rem; margin: 0; }
+    .day header button { font: inherit; border: none; background: none; cursor: pointer; font-size: 1.1rem; color: #6b6b66; padding: 0 4px; }
+    .day ul { list-style: none; margin: 10px 0 0; padding: 0; }
+    .day li { display: flex; gap: 8px; align-items: center; margin: 4px 0; font-weight: 600; }
+    .day li span { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+    .day textarea {
+      width: 100%; box-sizing: border-box; margin-top: 12px; min-height: 160px; resize: vertical;
+      font: inherit; line-height: 1.5; padding: 10px; border-radius: 10px;
+      border: 1px solid #d6cfbf; background: #fff; color: inherit;
+    }
+    .day textarea:focus { outline: 2px solid #2b59c3; outline-offset: 1px; }
+    .day footer { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; }
+    .day footer small { color: #6b6b66; }
+    @media (max-width: 720px) { .day { top: auto; bottom: 16px; } }
     .keys { margin: 8px 0 0; padding-left: 18px; color: #4a4a46; line-height: 1.55; }
     kbd { font: 600 0.75rem ui-monospace, monospace; background: #fff; border: 1px solid #d6cfbf; border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; }
   </style>
@@ -69,13 +90,16 @@
         <button type="button" class="plain" id="respawn">Back to start</button>
       </div>
 
+      <p class="tip">Click the calendar to change its layout or size. Click a day to write its summary.</p>
+
       <details class="sub">
-        <summary>Calendar size &amp; position</summary>
-        <label class="slider">Size <input type="range" id="w-scale" step="0.05"><output id="w-scale-out"></output></label>
-        <label class="slider">Distance <input type="range" id="w-dist" step="0.5"><output id="w-dist-out"></output></label>
-        <label class="slider">Left / right <input type="range" id="w-x" step="0.5"><output id="w-x-out"></output></label>
-        <label class="slider">Height <input type="range" id="w-y" step="0.25"><output id="w-y-out"></output></label>
-        <div class="row"><button type="button" class="plain" id="w-reset">Reset calendar</button></div>
+        <summary>Day summaries</summary>
+        <p class="tip" style="margin-top:8px">Summaries are saved in this browser. To move them to another device (like your headset), export here and import there.</p>
+        <div class="row">
+          <button type="button" class="plain" id="notes-export">Export</button>
+          <label class="plain" style="display:inline-block">Import<input type="file" id="notes-import" accept=".json,application/json" hidden></label>
+        </div>
+        <p class="tip" id="notes-status" style="margin-top:6px"></p>
       </details>
 
       <details class="sub">
@@ -85,17 +109,26 @@
           <li><kbd>Space</kbd>/<kbd>E</kbd> fly up · <kbd>Q</kbd> down</li>
           <li>Drag to look · scroll to zoom (3rd person / overview)</li>
           <li><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> or <kbd>V</kbd> change view · <kbd>F</kbd> power up</li>
-          <li>Click a month to bring it close · <kbd>Esc</kbd> sends it back</li>
+          <li>Click the calendar → <strong>Year</strong> / <strong>Month list</strong> / <strong>Bring to front</strong>, <strong>−</strong> / <strong>+</strong>, or drag the blue corner handle to resize</li>
+          <li>Click a month's name to bring it to the front · click a day for its summary · <kbd>Esc</kbd> closes</li>
         </ul>
         <ul class="keys">
           <li><strong>VR:</strong> press <strong>VR</strong> (bottom right)</li>
           <li>Left stick walk · right stick turn / fly up &amp; down</li>
-          <li>Trigger picks a month · hold <strong>Grip</strong> and drag to move the calendar</li>
+          <li>Trigger clicks the calendar, months, days and buttons · hold <strong>Grip</strong> and drag to move the calendar</li>
+          <li>Trigger-hold the blue corner handle and raise/lower your hand to resize</li>
           <li><strong>A</strong>/<strong>B</strong> bigger / smaller calendar · <strong>X</strong> change view · <strong>Y</strong> power up</li>
         </ul>
       </details>
     </div>
   </details>
+
+  <aside class="day" id="day" hidden aria-label="Day summary">
+    <header><h2 id="day-title"></h2><button type="button" id="day-close" aria-label="Close">✕</button></header>
+    <ul id="day-events" hidden></ul>
+    <textarea id="day-text" placeholder="Summary of the day: what got done, wins, notes, next steps…"></textarea>
+    <footer><small id="day-status"></small><button type="button" class="plain" id="day-delete">Clear</button></footer>
+  </aside>
 
   <a-scene
     background="color: #f3efe6"

@@ -83,105 +83,285 @@ AFRAME.registerComponent("cell-pillar", {
 
 // ── Calendar wall ─────────────────────────────────────────
 // The wall entity's origin is the bottom-center of the calendar, so scaling keeps it on the floor.
+// Layouts: "year" (4×3 grid) or "list" (month tabs down the left, selected month large on the right).
+// Any month can also be brought to the front, floating in front of the viewer.
+// Clicking the calendar shows its controls: layout buttons, size buttons, and a drag-to-resize handle.
 
-let focused = null;
-
-AFRAME.registerComponent("month-panel", {
-  init() {
-    this.home = null;
-    this.target = null;
-    this.el.addEventListener("click", () => {
-      if (pointer.dragged) return;
-      if (focused === this) return this.release();
-      if (focused) focused.release();
-      this.bringClose();
-    });
-  },
-  // Float the month in front of the viewer, wherever the wall currently is
-  bringClose() {
-    const { pos: camPos, fwd } = headPose();
-    const worldPos = camPos.clone().addScaledVector(fwd, 4.2);
-    const dummy = new THREE.Object3D();
-    dummy.position.copy(worldPos);
-    dummy.lookAt(camPos.x, worldPos.y, camPos.z);
-
-    const parent = this.el.object3D.parent;
-    parent.updateMatrixWorld();
-    const parentQuat = parent.getWorldQuaternion(new THREE.Quaternion());
-    const parentScale = parent.getWorldScale(new THREE.Vector3()).x;
-    this.target = {
-      pos: parent.worldToLocal(worldPos.clone()),
-      quat: parentQuat.invert().multiply(dummy.quaternion),
-      scale: 0.58 / parentScale,
-    };
-    focused = this;
-  },
-  release() {
-    this.target = this.home;
-    focused = null;
-  },
-  tick(t, dt) {
-    const o = this.el.object3D;
-    if (!this.home) {
-      this.home = { pos: o.position.clone(), quat: o.quaternion.clone(), scale: o.scale.x };
-      this.target = this.home;
-    }
-    const k = 1 - Math.exp(-(dt || 16) / 120);
-    o.position.lerp(this.target.pos, k);
-    o.quaternion.slerp(this.target.quat, k);
-    const s = o.scale.x + (this.target.scale - o.scale.x) * k;
-    o.scale.set(s, s, s);
-  },
-});
+const WALL = { PW: 6.4, PH: 5.6, GAP: 0.6, cols: 4, rows: 3 };
+const HIDDEN = 0.0001;
+const basic = (opts) => new THREE.MeshBasicMaterial({ fog: false, ...opts });
+const makeCanvas = (w, h) => Object.assign(document.createElement("canvas"), { width: w, height: h });
 
 AFRAME.registerComponent("calendar-wall", {
   init() {
-    const PW = 6.4, PH = 5.6, GAP = 0.6, cols = 4, rows = 3;
+    const { PW, PH, GAP, cols, rows } = WALL;
+    this.fy = DEFAULT_FY;
+    this.layout = "year";
+    this.selected = 0;
+    this.front = null;          // index of the month floating in front of the viewer
+    this.frontPose = null;
+    this.selectedDay = null;
+    this.controlsShown = false;
+    this.resizing = null;
+    this.items = [];            // entities eased toward a target pose every frame
+
     const left = -((cols * PW + (cols - 1) * GAP) / 2) + PW / 2;
     const bottom = 2.4 + PH / 2;
+    this.gridPos = (i) => new THREE.Vector3(left + (i % cols) * (PW + GAP), bottom + (rows - 1 - Math.floor(i / cols)) * (PH + GAP), 0);
+    this.tabPos = (i) => new THREE.Vector3(-11.6, 21.4 - i * 1.5, 0.05);
+    this.bigPos = new THREE.Vector3(4.25, 11.6, 0.05);
+    this.bigScale = 3;
 
-    this.panels = [];
-    for (let i = 0; i < 12; i++) {
-      const c = i % cols, r = rows - 1 - Math.floor(i / cols);
-      const canvas = document.createElement("canvas");
-      canvas.width = 1024; canvas.height = 896;
-      const tex = canvasTexture(canvas);
+    // Back slab: clicking empty wall shows the controls
+    const slab = this.addClickable(new THREE.Mesh(new THREE.BoxGeometry(30, 22, 0.6), lambert("#e9e3d6")), () => this.showControls(true));
+    this.track(slab, new THREE.Vector3(0, 12, -0.4), 1);
 
-      const group = new THREE.Group();
-      const face = new THREE.Mesh(new THREE.PlaneGeometry(PW, PH), new THREE.MeshBasicMaterial({ map: tex, fog: false }));
-      const frame = new THREE.Mesh(new THREE.PlaneGeometry(PW + 0.24, PH + 0.24), new THREE.MeshBasicMaterial({ color: "#d6cebd", fog: false }));
+    // Months
+    this.months = Array.from({ length: 12 }, (_, i) => {
+      const canvas = makeCanvas(1024, 896), tex = canvasTexture(canvas);
+      const face = new THREE.Mesh(new THREE.PlaneGeometry(PW, PH), basic({ map: tex }));
+      const frame = new THREE.Mesh(new THREE.PlaneGeometry(PW + 0.24, PH + 0.24), basic({ color: "#d6cebd" }));
       frame.position.z = -0.03;
+      const group = new THREE.Group();
       group.add(frame, face);
+      const el = this.addClickable(group, (e) => this.onMonthClick(i, face, e));
+      return { canvas, tex, item: this.track(el, this.gridPos(i), 1) };
+    });
 
-      const el = document.createElement("a-entity");
-      el.classList.add("clickable");
-      el.setAttribute("position", `${left + c * (PW + GAP)} ${bottom + r * (PH + GAP)} 0`);
-      el.setAttribute("month-panel", "");
-      el.addEventListener("loaded", () => el.setObject3D("mesh", group), { once: true });
-      this.el.appendChild(el);
-      this.panels.push({ canvas, tex });
-    }
+    // Month tabs for the list layout
+    this.tabs = Array.from({ length: 12 }, (_, i) => {
+      const canvas = makeCanvas(1024, 200), tex = canvasTexture(canvas);
+      const el = this.addClickable(new THREE.Mesh(new THREE.PlaneGeometry(5.8, 1.13), basic({ map: tex })), () => this.selectMonth(i));
+      return { canvas, tex, item: this.track(el, this.tabPos(i), HIDDEN) };
+    });
 
-    const back = new THREE.Mesh(new THREE.BoxGeometry(30, 22, 0.6), lambert("#e9e3d6"));
-    back.position.set(0, 12, -0.4);
-    this.el.object3D.add(back);
+    // Toolbar (above the calendar) — hidden until the calendar is clicked
+    const buttons = [
+      { id: "year", label: "Year", w: 3.0 },
+      { id: "list", label: "Month list", w: 4.4 },
+      { id: "front", label: "Bring to front", w: 5.4 },
+      { id: "smaller", label: "−", w: 1.5 },
+      { id: "bigger", label: "+", w: 1.5 },
+      { id: "reset", label: "Reset", w: 2.6 },
+      { id: "close", label: "✕", w: 1.5 },
+    ];
+    const gap = 0.3, total = buttons.reduce((s, b) => s + b.w, 0) + gap * (buttons.length - 1);
+    let x = -total / 2;
+    this.buttons = buttons.map((b) => {
+      const canvas = makeCanvas(Math.round(b.w * 160), 208), tex = canvasTexture(canvas);
+      const el = this.addClickable(new THREE.Mesh(new THREE.PlaneGeometry(b.w, 1.3), basic({ map: tex })), () => this.onButton(b.id));
+      const pos = new THREE.Vector3(x + b.w / 2, 24.1, 0.1);
+      x += b.w + gap;
+      return { ...b, canvas, tex, item: this.track(el, pos, HIDDEN) };
+    });
 
-    const tc = document.createElement("canvas");
-    tc.width = 2048; tc.height = 512;
-    this.titleCanvas = tc;
-    this.titleTex = canvasTexture(tc);
-    const title = new THREE.Mesh(
-      new THREE.PlaneGeometry(22, 5.5),
-      new THREE.MeshBasicMaterial({ map: this.titleTex, transparent: true, fog: false })
-    );
-    title.position.set(0, 27.2, 0);
+    // Drag-to-resize handle on the bottom-right corner
+    const hc = makeCanvas(256, 256);
+    drawHandle(hc);
+    const handle = this.addClickable(new THREE.Mesh(new THREE.PlaneGeometry(1.8, 1.8), basic({ map: canvasTexture(hc), transparent: true })));
+    handle.addEventListener("mousedown", (e) => this.startResize(e.detail.cursorEl));
+    this.handle = this.track(handle, new THREE.Vector3(15.1, 1.1, 0.4), HIDDEN);
+
+    // Title
+    this.titleCanvas = makeCanvas(2048, 512);
+    this.titleTex = canvasTexture(this.titleCanvas);
+    const title = new THREE.Mesh(new THREE.PlaneGeometry(22, 5.5), basic({ map: this.titleTex, transparent: true }));
+    title.position.set(0, 28.6, 0);
     this.el.object3D.add(title);
+
+    // Desktop drag-to-resize
+    window.addEventListener("pointermove", (e) => {
+      if (!this.resizing || this.resizing.hand) return;
+      this.el.emit("wall-scale", { scale: this.el.object3D.scale.x * Math.exp((e.movementX - e.movementY) * 0.002) });
+    });
+    window.addEventListener("pointerup", () => this.endResize());
   },
-  render(fy) {
-    const months = fiscalMonths(fy), events = eventsByDate();
-    this.panels.forEach((p, i) => { drawMonth(p.canvas, months[i], events); p.tex.needsUpdate = true; });
-    drawTitle(this.titleCanvas, fy);
+
+  // Create a clickable child entity holding a mesh
+  addClickable(object, onClick) {
+    const el = document.createElement("a-entity");
+    el.classList.add("clickable");
+    el.addEventListener("loaded", () => el.setObject3D("mesh", object), { once: true });
+    if (onClick) el.addEventListener("click", (e) => { if (!pointer.dragged) onClick(e); });
+    this.el.appendChild(el);
+    return el;
+  },
+
+  track(el, pos, scale) {
+    const item = { el, snap: true, target: { pos, quat: new THREE.Quaternion(), scale } };
+    this.items.push(item);
+    return item;
+  },
+
+  setTarget(item, pos, scale, quat = new THREE.Quaternion()) {
+    item.target = { pos, quat, scale };
+  },
+
+  tick(t, dt) {
+    const k = 1 - Math.exp(-(dt || 16) / 120);
+    this.items.forEach((item) => {
+      if (!item.el.hasLoaded) return;
+      const o = item.el.object3D, { pos, quat, scale } = item.target;
+      if (item.snap) { o.position.copy(pos); o.quaternion.copy(quat); o.scale.setScalar(scale); item.snap = false; }
+      o.position.lerp(pos, k);
+      o.quaternion.slerp(quat, k);
+      o.scale.setScalar(o.scale.x + (scale - o.scale.x) * k);
+      o.visible = o.scale.x > HIDDEN * 20;
+    });
+
+    // VR drag-to-resize: move the controller up/right to grow, down/left to shrink
+    const r = this.resizing;
+    if (r && r.hand) {
+      const d = r.hand.object3D.getWorldPosition(new THREE.Vector3()).sub(r.start);
+      this.el.emit("wall-scale", { scale: r.startScale * Math.exp((d.x + d.y) * 0.8) });
+    }
+  },
+
+  // ── Layout ──────────────────────────────────────────────
+  applyLayout() {
+    const list = this.layout === "list";
+    this.months.forEach((m, i) => {
+      if (this.front === i && this.frontPose) {
+        this.setTarget(m.item, this.frontPose.pos, this.frontPose.scale, this.frontPose.quat);
+      } else if (list) {
+        this.setTarget(m.item, this.bigPos, i === this.selected ? this.bigScale : HIDDEN);
+      } else {
+        this.setTarget(m.item, this.gridPos(i), 1);
+      }
+    });
+    this.tabs.forEach((tab, i) => this.setTarget(tab.item, this.tabPos(i), list ? 1 : HIDDEN));
+    const shown = this.controlsShown ? 1 : HIDDEN;
+    this.buttons.forEach((b) => this.setTarget(b.item, b.item.target.pos, shown));
+    this.setTarget(this.handle, this.handle.target.pos, shown);
+    this.renderControls();
+  },
+
+  setLayout(layout) {
+    this.layout = layout;
+    this.front = null;
+    this.applyLayout();
+    this.el.emit("layout-changed", { layout });
+  },
+
+  selectMonth(i) {
+    this.selected = i;
+    this.front = null;
+    this.applyLayout();
+  },
+
+  toggleFront(i) {
+    if (this.front === i) {
+      this.front = null;
+    } else {
+      this.front = i;
+      this.selected = i;
+      this.frontPose = this.poseInFrontOfViewer();
+    }
+    this.applyLayout();
+  },
+
+  clearFront() {
+    if (this.front === null) return false;
+    this.front = null;
+    this.applyLayout();
+    return true;
+  },
+
+  // Where to float a month so it sits ~4 m in front of the viewer, in the wall's own coordinates
+  poseInFrontOfViewer() {
+    // follow the actual gaze (including looking up/down), but keep the month upright
+    const cam = document.getElementById("cam").getObject3D("camera");
+    const camPos = cam.getWorldPosition(new THREE.Vector3());
+    const gaze = cam.getWorldDirection(new THREE.Vector3());
+    const worldPos = camPos.clone().addScaledVector(gaze, 4.2);
+    const dummy = new THREE.Object3D();
+    dummy.position.copy(worldPos);
+    dummy.lookAt(camPos.x, worldPos.y, camPos.z);
+    const wall = this.el.object3D;
+    wall.updateMatrixWorld();
+    const wallQuat = wall.getWorldQuaternion(new THREE.Quaternion());
+    return {
+      pos: wall.worldToLocal(worldPos.clone()),
+      quat: wallQuat.invert().multiply(dummy.quaternion),
+      scale: 0.5 / wall.getWorldScale(new THREE.Vector3()).x,
+    };
+  },
+
+  showControls(on) {
+    if (this.controlsShown === on) return;
+    this.controlsShown = on;
+    this.applyLayout();
+  },
+
+  onButton(id) {
+    if (id === "year" || id === "list") this.setLayout(id);
+    if (id === "front") this.toggleFront(this.selected);
+    if (id === "smaller") this.el.emit("wall-resize", { factor: 1 / 1.15 });
+    if (id === "bigger") this.el.emit("wall-resize", { factor: 1.15 });
+    if (id === "reset") this.el.emit("wall-reset");
+    if (id === "close") this.showControls(false);
+  },
+
+  // Header → bring the month to the front (or send it back). Day → select it and open its summary.
+  onMonthClick(i, face, e) {
+    this.showControls(true);
+    const hit = e.detail.intersection;
+    if (!hit || hit.object !== face || !hit.uv) return;
+    const cx = hit.uv.x * 1024, cy = (1 - hit.uv.y) * 896;
+    if (cy < HEADER_BOTTOM) return this.toggleFront(i);
+    const key = dayAt(fiscalMonths(this.fy)[i], cx, cy);
+    if (!key) return;
+    this.selected = i;
+    this.selectedDay = key;
+    this.render();
+    this.el.emit("day-selected", { key });
+  },
+
+  // ── Resize handle ───────────────────────────────────────
+  startResize(cursorEl) {
+    const hand = cursorEl && cursorEl !== this.el.sceneEl ? cursorEl : null;
+    this.resizing = {
+      hand,
+      startScale: this.el.object3D.scale.x,
+      start: hand ? hand.object3D.getWorldPosition(new THREE.Vector3()) : null,
+    };
+    pointer.dragged = true;
+    if (hand) hand.addEventListener("mouseup", () => this.endResize(), { once: true });
+  },
+
+  endResize() {
+    if (!this.resizing) return;
+    this.resizing = null;
+    this.el.emit("wall-resize-end");
+  },
+
+  // ── Drawing ─────────────────────────────────────────────
+  setFY(fy) {
+    this.fy = fy;
+    const now = new Date();
+    const idx = fiscalMonths(fy).findIndex((m) => m.year === now.getFullYear() && m.month === now.getMonth());
+    this.selected = idx >= 0 ? idx : 0;
+    this.front = null;
+    this.render();
+    this.applyLayout();
+  },
+
+  render() {
+    const months = fiscalMonths(this.fy), events = eventsByDate(), notes = window.dayNotes || {};
+    this.months.forEach((m, i) => { drawMonth(m.canvas, months[i], events, notes, this.selectedDay); m.tex.needsUpdate = true; });
+    drawTitle(this.titleCanvas, this.fy);
     this.titleTex.needsUpdate = true;
+    this.renderControls();
+  },
+
+  renderControls() {
+    const months = fiscalMonths(this.fy);
+    this.tabs.forEach((tab, i) => { drawTab(tab.canvas, months[i], i === this.selected); tab.tex.needsUpdate = true; });
+    this.buttons.forEach((b) => {
+      const active = b.id === this.layout || (b.id === "front" && this.front !== null);
+      drawButton(b.canvas, b.label, active);
+      b.tex.needsUpdate = true;
+    });
   },
 });
 

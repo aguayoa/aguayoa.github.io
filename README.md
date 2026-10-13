@@ -19,7 +19,7 @@ My personal homepage: a Projects section with a page per project, and a walk-in 
 | `assets/projects.js` | Project info, tasks, status |
 | `assets/events.js` | Events shown on the Calendar wall |
 | `index.html` | Greeting name (`OWNER`) |
-| `calendar/index.html` | Fiscal year settings (`FY_START_MONTH`, `FY_CHOICES`) |
+| `calendar/draw.js` | Fiscal year settings (`FY_START_MONTH`, `FY_CHOICES`) |
 
 ## Updating
 
@@ -27,6 +27,12 @@ My personal homepage: a Projects section with a page per project, and a walk-in 
 - **Change status:** set `status` to `active`, `planning`, `talks`, `paused`, or `done`.
 - **Add a project:** copy one `{ ... }` block in `assets/projects.js` and give it a new `id`.
 - **Add a calendar event:** add `{ date: "2026-03-15", title: "Short title" }` to `assets/events.js`.
+
+## Calendar
+
+- **Click the calendar** to show its controls: **Year** (12-month grid), **Month list** (months down the left, selected month large), **Bring to front**, **−** / **+**, **Reset**, and a blue corner handle you drag to resize.
+- **Click a month's name** to bring it to the front; click again to send it back.
+- **Click a day** to write a summary for it. Summaries save in that browser; use *Day summaries → Export / Import* in the menu to move them to another device.
 
 ## Calendar in VR
 

@@ -1,4 +1,4 @@
-// Movement, camera views, calendar size/position, and the on-screen menu.
+// Movement, camera views, calendar size/position, day summaries, and the on-screen menu.
 
 const VIEWS = ["first", "third", "overview"];
 const WALL_DEFAULT = { scale: 1, dist: 22.4, x: 0, y: 0 };
@@ -34,7 +34,17 @@ const state = {
   fly: 0,                                       // VR right stick up/down
   grab: null,
 };
-const persist = () => store.save({ view: state.view, wall: state.wall, powered: state.powered });
+state.layout = saved.layout === "list" ? "list" : "year";
+const persist = () => store.save({ view: state.view, wall: state.wall, powered: state.powered, layout: state.layout });
+
+// Day summaries, saved in this browser: { "YYYY-MM-DD": "text" }
+const NOTES_KEY = "time-chamber-days";
+window.dayNotes = (() => {
+  try { return JSON.parse(localStorage.getItem(NOTES_KEY) || "{}"); } catch { return {}; }
+})();
+function saveNotes() {
+  try { localStorage.setItem(NOTES_KEY, JSON.stringify(window.dayNotes)); return true; } catch { return false; }
+}
 const clamp = (v, [lo, hi]) => Math.min(hi, Math.max(lo, v));
 
 // Real head pose: the THREE camera is driven by WebXR in VR and by this script on desktop
@@ -69,8 +79,22 @@ AFRAME.registerComponent("time-chamber", {
     // Calendar contents
     const q = Number(new URLSearchParams(location.search).get("fy"));
     state.fy = FY_CHOICES.includes(q) ? q : DEFAULT_FY;
+    const wall = els.wall.components["calendar-wall"];
+    els.wallC = wall;
+    wall.layout = state.layout;
     setFY(state.fy);
     applyWall();
+
+    // Calendar controls on the wall itself
+    els.wall.addEventListener("wall-scale", (e) => {
+      state.wall.scale = clamp(e.detail.scale, WALL_LIMITS.scale);
+      applyWall();
+    });
+    els.wall.addEventListener("wall-resize", (e) => resizeWall(e.detail.factor));
+    els.wall.addEventListener("wall-resize-end", persist);
+    els.wall.addEventListener("wall-reset", () => { state.wall = { ...WALL_DEFAULT }; applyWall(); persist(); });
+    els.wall.addEventListener("layout-changed", (e) => { state.layout = e.detail.layout; persist(); });
+    els.wall.addEventListener("day-selected", (e) => openDay(e.detail.key));
     setView(state.view);
     setPowered(state.powered);
 
@@ -85,7 +109,7 @@ AFRAME.registerComponent("time-chamber", {
       if (!pointer.downAt) return;
       const dx = e.clientX - pointer.downAt[0], dy = e.clientY - pointer.downAt[1];
       if (Math.hypot(dx, dy) > 6) pointer.dragged = true;
-      if (pointer.dragged) {
+      if (pointer.dragged && !els.wallC.resizing) {
         state.look.yaw -= e.movementX * 0.0045;
         state.look.pitch = Math.max(-1.45, Math.min(1.45, state.look.pitch - e.movementY * 0.0045));
       }
@@ -99,14 +123,14 @@ AFRAME.registerComponent("time-chamber", {
     }, { passive: false });
 
     window.addEventListener("keydown", (e) => {
-      if (e.target.closest && e.target.closest("input, button, select")) return;
+      if (e.code === "Escape") { if (!closeDay()) els.wallC.clearFront(); return; }
+      if (e.target.closest && e.target.closest("input, button, select, textarea")) return;
       state.keys.add(e.code);
       if (e.code === "Digit1") setView("first");
       if (e.code === "Digit2") setView("third");
       if (e.code === "Digit3") setView("overview");
       if (e.code === "KeyV") cycleView();
       if (e.code === "KeyF") setPowered(!state.powered);
-      if (e.code === "Escape" && focused) focused.release();
       if (["Space", "ArrowUp", "ArrowDown"].includes(e.code)) e.preventDefault();
     });
     window.addEventListener("keyup", (e) => state.keys.delete(e.code));
@@ -221,7 +245,7 @@ AFRAME.registerComponent("time-chamber", {
 // ── Actions ───────────────────────────────────────────────
 function setView(view) {
   state.view = view;
-  if (focused) focused.release();
+  if (els.wallC) els.wallC.clearFront();
   if (view === "first") state.look.pitch = Math.min(state.look.pitch, 0.4);
   if (view === "third") state.look.pitch = -0.22;
   if (view === "overview") state.look.pitch = -0.75;
@@ -242,7 +266,7 @@ function setPowered(on) {
 
 function setFY(fy) {
   state.fy = fy;
-  els.wall.components["calendar-wall"].render(fy);
+  els.wallC.setFY(fy);
   document.querySelectorAll("#fy-buttons button").forEach((b) => b.setAttribute("aria-pressed", String(Number(b.dataset.fy) === fy)));
   const params = new URLSearchParams(location.search);
   params.set("fy", fy);
@@ -253,12 +277,6 @@ function applyWall() {
   const w = state.wall;
   els.wall.object3D.position.set(w.x, w.y, -w.dist);
   els.wall.object3D.scale.setScalar(w.scale);
-  ["scale", "dist", "x", "y"].forEach((key) => {
-    const input = document.getElementById(`w-${key}`);
-    if (input && document.activeElement !== input) input.value = w[key];
-    const out = document.getElementById(`w-${key}-out`);
-    if (out) out.textContent = key === "scale" ? `${Math.round(w[key] * 100)}%` : `${w[key].toFixed(1)} m`;
-  });
 }
 
 function resizeWall(factor) {
@@ -278,23 +296,110 @@ document.getElementById("fy-buttons").addEventListener("click", (e) => {
   if (fy && els.wall) setFY(fy);
 });
 document.getElementById("power").addEventListener("click", () => setPowered(!state.powered));
-["scale", "dist", "x", "y"].forEach((key) => {
-  const input = document.getElementById(`w-${key}`);
-  [input.min, input.max] = WALL_LIMITS[key];
-  input.addEventListener("input", () => {
-    state.wall[key] = Number(input.value);
-    applyWall();
-  });
-  input.addEventListener("change", persist);
-});
-document.getElementById("w-reset").addEventListener("click", () => {
-  state.wall = { ...WALL_DEFAULT };
-  applyWall();
-  persist();
-});
 document.getElementById("respawn").addEventListener("click", () => {
   state.player.set(START.x, groundAt(START.x, START.z), START.z);
   state.facing = 0;
   state.look.yaw = 0;
   setView(state.view);
+});
+
+// ── Day summaries ─────────────────────────────────────────
+const dayEl = {
+  panel: document.getElementById("day"),
+  title: document.getElementById("day-title"),
+  events: document.getElementById("day-events"),
+  text: document.getElementById("day-text"),
+  status: document.getElementById("day-status"),
+};
+let openKey = null, saveTimer = null;
+
+function openDay(key) {
+  const events = eventsByDate()[key] || [];
+  if (els.scene.is("vr-mode")) return showDayCard(key, events);
+  openKey = key;
+  dayEl.title.textContent = formatDay(key);
+  dayEl.events.innerHTML = events.map((e) =>
+    `<li><span style="background:${e.color || "#2b59c3"}"></span>${e.title.replace(/</g, "&lt;")}</li>`).join("");
+  dayEl.events.hidden = !events.length;
+  dayEl.text.value = window.dayNotes[key] || "";
+  dayEl.status.textContent = window.dayNotes[key] ? "Saved in this browser" : "";
+  dayEl.panel.hidden = false;
+  dayEl.text.focus();
+}
+
+function storeDay() {
+  if (!openKey) return;
+  const text = dayEl.text.value.trim();
+  if (text) window.dayNotes[openKey] = text;
+  else delete window.dayNotes[openKey];
+  dayEl.status.textContent = saveNotes() ? (text ? "Saved in this browser" : "Summary cleared") : "Couldn't save (browser storage is blocked)";
+  els.wallC.render();
+}
+
+function closeDay() {
+  if (dayEl.panel.hidden) return false;
+  clearTimeout(saveTimer);
+  storeDay();
+  dayEl.panel.hidden = true;
+  openKey = null;
+  els.wallC.selectedDay = null;
+  els.wallC.render();
+  return true;
+}
+
+dayEl.text.addEventListener("input", () => {
+  dayEl.status.textContent = "Saving…";
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(storeDay, 500);
+});
+document.getElementById("day-close").addEventListener("click", closeDay);
+document.getElementById("day-delete").addEventListener("click", () => {
+  dayEl.text.value = "";
+  storeDay();
+});
+
+// In VR there's no keyboard, so show the summary on a card floating in front of you
+let dayCard = null;
+function showDayCard(key, events) {
+  if (!dayCard) {
+    const canvas = makeCanvas(1024, 768), tex = canvasTexture(canvas);
+    const el = document.createElement("a-entity");
+    el.classList.add("clickable");
+    el.addEventListener("loaded", () => el.setObject3D("mesh", new THREE.Mesh(new THREE.PlaneGeometry(2.4, 1.8), basic({ map: tex }))), { once: true });
+    el.addEventListener("click", () => { el.object3D.visible = false; el.object3D.scale.setScalar(HIDDEN); });
+    els.scene.appendChild(el);
+    dayCard = { el, canvas, tex };
+  }
+  drawDayCard(dayCard.canvas, key, events, window.dayNotes[key]);
+  dayCard.tex.needsUpdate = true;
+  const { pos, fwd } = headPose();
+  const right = new THREE.Vector3(-fwd.z, 0, fwd.x);
+  const at = pos.clone().addScaledVector(fwd, 2.6).addScaledVector(right, 1.1).add(new THREE.Vector3(0, -0.3, 0));
+  const o = dayCard.el.object3D;
+  o.position.copy(at);
+  o.lookAt(pos.x, at.y, pos.z);
+  o.scale.setScalar(1);
+  o.visible = true;
+}
+
+// Move summaries between browsers / devices
+document.getElementById("notes-export").addEventListener("click", () => {
+  const blob = new Blob([JSON.stringify(window.dayNotes, null, 2)], { type: "application/json" });
+  const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(blob), download: "day-summaries.json" });
+  a.click();
+  URL.revokeObjectURL(a.href);
+});
+document.getElementById("notes-import").addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  try {
+    const data = JSON.parse(await file.text());
+    Object.entries(data).forEach(([k, v]) => { if (/^\d{4}-\d{2}-\d{2}$/.test(k) && typeof v === "string") window.dayNotes[k] = v; });
+    saveNotes();
+    els.wallC.render();
+    document.getElementById("notes-status").textContent = `Imported ${Object.keys(data).length} days`;
+  } catch {
+    document.getElementById("notes-status").textContent = "That file isn't a summaries export";
+  }
+  e.target.value = "";
 });
